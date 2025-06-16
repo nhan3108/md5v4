@@ -20,7 +20,7 @@ if not TOKEN:
     raise ValueError("❌ BOT_TOKEN chưa được thiết lập.")
 ADMIN_ID = 7780640154
 LIEN_HE_HO_TRO = "@huydev"
-NHOM_YEU_CAU = ["@techtitansteam", "@techtitansteamchat", "sharetoolkaka"]
+NHOM_YEU_CAU = ["@techtitansteam", "@techtitansteamchat", "@sharetoolkaka"]
 MA_VIP = "VIP7NGAYMIENPHI"
 TEN_BOT = "botmd5v2pro_bot"
 
@@ -395,6 +395,7 @@ def xu_ly_bat_dau(tin_nhan):
         f"│ 🚀 <b>Tham gia các nhóm vũ trụ để nhận VIP MIỄN PHÍ 7 ngày!</b>\n"
         f"│ 👥 @techtitansteam\n"
         f"│ 👥 @techtitansteamchat\n"
+        f"│ 👥 @sharetoolkaka\n"
         f"│ 🪐 Nhấn nút để xác minh và nhận mã!\n"
         f"╰━━━━━━━━━━━━━━━━━━━━━━━╯"
     )
