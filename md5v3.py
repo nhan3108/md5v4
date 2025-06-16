@@ -15,6 +15,8 @@ import random
 # CẤU HÌNH HỆ THỐNG
 # ==============================================
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("❌ BOT_TOKEN chưa được thiết lập.")
 ADMIN_ID = 7780640154
 SUPPORT_CONTACT = "@huydev"
 REQUIRED_GROUPS = ["@techtitansteam", "@techtitansteamchat"]
