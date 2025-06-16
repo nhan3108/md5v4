@@ -1,4 +1,5 @@
 import os
+import threading
 import telebot
 from telebot import types
 from datetime import datetime, timedelta
@@ -10,7 +11,6 @@ import hashlib
 from collections import defaultdict
 import time
 import random
-import asyncio
 
 # ==============================================
 # CẤU HÌNH HỆ THỐNG
@@ -19,32 +19,34 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("❌ BOT_TOKEN chưa được thiết lập!")
 ADMIN_ID = 7780640154
-LIEN_HE_HO_TRO = "@huydev"
-NHOM_YEU_CAU = ["@techtitansteam"]
-MA_VIP = "VIP7NGAYMIENPHI"
-TEN_BOT = "botmd5v2pro_bot"
-SERVER_TRANG_THAI = True  # True: Bật, False: Tắt
+SUPPORT_CONTACT = "@huydev"
+REQUIRED_GROUPS = ["@techtitansteam", "@techtitansteamchat"]
+PREMIUM_CODE = "VIP7DAYFREE"
+BOT_USERNAME = "botmd5v2pro_bot"
 
 bot = telebot.TeleBot(TOKEN)
 
-# Biểu tượng phản hồi động
-PHAN_HOI_EMOJI = ["🌌", "🚀", "🪐", "⭐", "💫"]
+# Danh sách emoji reaction ngẫu nhiên
+REACTION_EMOJIS = ["👀"]
 
-# Biểu tượng giao diện hiện đại
-BIỂU_TƯỢNG = {
-    "thanh_cong": "✅", "loi": "❌", "thong_tin": "ℹ️", "canh_bao": "⚠️", "vip": "💎",
-    "khoa": "🔒", "mo_khoa": "🔓", "dong_ho": "⏳", "thong_ke": "📊", "lich_su": "📜",
-    "nguoi_dung": "👤", "quan_tri": "🛡️", "phat_tin": "📡", "moi_ban": "📩", "nhom": "👥",
-    "tai": "🎰", "xiu": "🎲", "dong_co": "⚙️", "rủi_ro": "🚨", "thoi_gian": "⏰",
-    "dung": "✔️", "sai": "❌", "phan_tich": "🔍", "moi": "📬", "tro_giup": "🆘"
+# Danh sách icon ngẫu nhiên cho tin nhắn phản hồi
+RESPONSE_ICONS = ["🌟", "🚀", "🦠", "🔮", "🧬", "⚡️", "🌌", "🛡️", "💎", "🔥", "🎯", "🦾"]
+
+# Icon hệ thống
+ICONS = {
+    "success": "✅", "error": "❌", "info": "ℹ️", "warning": "⚠️", "vip": "💎",
+    "lock": "🔒", "unlock": "🔓", "clock": "⏰", "stats": "📊", "history": "📜",
+    "user": "👤", "admin": "🛡️", "broadcast": "📢", "referral": "📨", "group": "👥",
+    "tai": "🎰", "xiu": "🎲", "engine": "⚙️", "risk": "🚸", "time": "⏰",
+    "correct": "✔️", "wrong": "❌", "analyze": "🔍", "invite": "📩", "help": "🆘"
 }
 
 # ==============================================
-# QUẢN LÝ CƠ SỞ DỮ LIỆU
+# CƠ SỞ DỮ LIỆU
 # ==============================================
-class CoSoDuLieu:
+class Database:
     @staticmethod
-    def tai(filename):
+    def load(filename):
         try:
             with open(f'{filename}.json', 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -52,7 +54,7 @@ class CoSoDuLieu:
             return {}
 
     @staticmethod
-    def luu(data, filename):
+    def save(data, filename):
         try:
             with open(f'{filename}.json', 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -60,1292 +62,1255 @@ class CoSoDuLieu:
             print(f"Lỗi lưu {filename}: {e}")
 
 # Khởi tạo cơ sở dữ liệu
-nguoi_dung = CoSoDuLieu.tai('nguoi_dung')
-lich_su = CoSoDuLieu.tai('lich_su')
-hoat_dong = CoSoDuLieu.tai('hoat_dong')
-ma_vip_db = CoSoDuLieu.tai('ma_vip')
-moi_ban_db = CoSoDuLieu.tai('moi_ban')
-cau_hinh_db = CoSoDuLieu.tai('cau_hinh')
-che_do_dao = cau_hinh_db.get('che_do_dao', False)
+users = Database.load('users')
+history = Database.load('history')
+activity = Database.load('activity')
+codes_db = Database.load('codes')
+referral_db = Database.load('referral')
+config_db = Database.load('config')
+reverse_mode = config_db.get('reverse_mode', False)
 
 # ==============================================
 # TIỆN ÍCH HỆ THỐNG
 # ==============================================
-async def kiem_tra_tham_gia_nhom(user_id):
-    nhom_thieu = []
-    cache_key = f"nhom_{user_id}"
-    cache = CoSoDuLieu.tai('cache_nhom').get(cache_key, {})
-    thoi_gian_cache = cache.get('thoi_gian', 0)
-    
-    if time.time() - thoi_gian_cache < 120:  # Cache 120 giây
-        return cache.get('nhom_thieu', NHOM_YEU_CAU)
-    
-    for nhom in NHOM_YEU_CAU:
-        for attempt in range(3):  # Thử lại 3 lần
-            try:
-                thanh_vien = await bot.get_chat_member(nhom, user_id)
-                if thanh_vien.status not in ['member', 'administrator', 'creator']:
-                    nhom_thieu.append(nhom)
-                break
-            except telebot.apihelper.ApiTelegramException as e:
-                if "rate limit" in str(e).lower():
-                    await asyncio.sleep(1)
-                    continue
-                nhom_thieu.append(nhom)
-                break
-    
-    cache_nhom = CoSoDuLieu.tai('cache_nhom')
-    cache_nhom[cache_key] = {
-        'nhom_thieu': nhom_thieu,
-        'thoi_gian': time.time()
-    }
-    CoSoDuLieu.luu(cache_nhom, 'cache_nhom')
-    
-    return nhom_thieu
+def is_user_in_group(user_id, group_username):
+    try:
+        chat_member = bot.get_chat_member(group_username, user_id)
+        return chat_member.status in ['member', 'administrator', 'creator']
+    except:
+        return False
 
-def kich_hoat_vip(uid, days=7, mo_rong=False):
+def check_group_membership(user_id):
+    return [group for group in REQUIRED_GROUPS if not is_user_in_group(user_id, group)]
+
+def is_vip_active(uid):
     uid = str(uid)
-    nguoi_dung[uid] = nguoi_dung.get(uid, {})
-    if mo_rong and nguoi_dung[uid].get("vip_het_han"):
+    user = users.get(uid, {})
+    if not user.get("vip_active", False):
+        return False
+    exp_str = user.get("vip_expire", "")
+    try:
+        return datetime.now() <= datetime.strptime(exp_str, "%Y-%m-%d %H:%M:%S")
+    except:
+        return False
+
+def activate_vip(uid, days=7, extend=False):
+    uid = str(uid)
+    users[uid] = users.get(uid, {})
+    if extend and users[uid].get("vip_expire"):
         try:
-            het_han_hien_tai = datetime.strptime(nguoi_dung[uid]["vip_het_han"], "%Y-%m-%d %H:%M:%S")
-            ngay_het_han = (max(datetime.now(), het_han_hien_tai) + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            current_expire = datetime.strptime(users[uid]["vip_expire"], "%Y-%m-%d %H:%M:%S")
+            exp_date = (max(datetime.now(), current_expire) + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
         except:
-            ngay_het_han = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            exp_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     else:
-        ngay_het_han = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        exp_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     
-    nguoi_dung[uid]["vip_kich_hoat"] = True
-    nguoi_dung[uid]["vip_het_han"] = ngay_het_han
-    nguoi_dung[uid]["lan_hoat_dong_cuoi"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    CoSoDuLieu.luu(nguoi_dung, 'nguoi_dung')
-    return ngay_het_han
+    users[uid]["vip_active"] = True
+    users[uid]["vip_expire"] = exp_date
+    users[uid]["last_active"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    Database.save(users, 'users')
+    return exp_date
 
-def tao_ma_vip(ma_ten, days, so_lan_su_dung_toi_da=1):
-    ma_vip_db[ma_ten] = {
+def create_premium_code(code_name, days, max_uses=1):
+    codes_db[code_name] = {
         "days": days,
-        "so_lan_su_dung_toi_da": so_lan_su_dung_toi_da,
-        "so_lan_su_dung": 0,
-        "ngay_tao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "nguoi_su_dung": []
+        "max_uses": max_uses,
+        "used_count": 0,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "used_by": []
     }
-    CoSoDuLieu.luu(ma_vip_db, 'ma_vip')
-    return ma_vip_db[ma_ten]
+    Database.save(codes_db, 'codes')
+    return codes_db[code_name]
 
-def su_dung_ma_vip(ma_ten, user_id):
-    if ma_ten not in ma_vip_db:
-        return False, f"{BIỂU_TƯỢNG['loi']} Mã không hợp lệ!"
-    ma = ma_vip_db[ma_ten]
+def use_premium_code(code_name, user_id):
+    if code_name not in codes_db:
+        return False, f"{ICONS['error']} Mã không hợp lệ!"
+    code = codes_db[code_name]
     user_id = str(user_id)
-    if user_id in ma["nguoi_su_dung"]:
-        return False, f"{BIỂU_TƯỢNG['canh_bao']} Bạn đã dùng mã này rồi!"
-    if ma["so_lan_su_dung"] >= ma["so_lan_su_dung_toi_da"]:
-        return False, f"{BIỂU_TƯỢNG['dong_ho']} Mã đã hết lượt sử dụng!"
+    if user_id in code["used_by"]:
+        return False, f"{ICONS['warning']} Bạn đã sử dụng mã này!"
+    if code["used_count"] >= code["max_uses"]:
+        return False, f"{ICONS['clock']} Mã đã hết lượt sử dụng!"
     
-    mo_rong = user_id in nguoi_dung and nguoi_dung[user_id].get("vip_kich_hoat")
-    ngay_het_han = kich_hoat_vip(user_id, ma["days"], mo_rong)
-    ma["so_lan_su_dung"] += 1
-    ma["nguoi_su_dung"].append(user_id)
-    CoSoDuLieu.luu(ma_vip_db, 'ma_vip')
-    return True, f"{BIỂU_TƯỢNG['thanh_cong']} Kích hoạt VIP {ma['days']} ngày!\n{BIỂU_TƯỢNG['dong_ho']} Hết hạn: {ngay_het_han}"
+    extend = user_id in users and users[user_id].get("vip_active")
+    exp_date = activate_vip(user_id, code["days"], extend)
+    code["used_count"] += 1
+    code["used_by"].append(user_id)
+    Database.save(codes_db, 'codes')
+    return True, f"{ICONS['success']} Kích hoạt VIP {code['days']} ngày thành công!\n⏰ Hết hạn: {exp_date}"
 
-def theo_doi_hoat_dong(user_id, hanh_dong):
+def track_activity(user_id, action):
     user_id = str(user_id)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    hoat_dong[user_id] = hoat_dong.get(user_id, {
-        "lan_dau_xem": now,
-        "lan_cuoi_xem": now,
-        "so_lan_yeu_cau": 0,
-        "hanh_dong": []
+    activity[user_id] = activity.get(user_id, {
+        "first_seen": now,
+        "last_seen": now,
+        "request_count": 0,
+        "actions": []
     })
-    hoat_dong[user_id]["lan_cuoi_xem"] = now
-    hoat_dong[user_id]["so_lan_yeu_cau"] += 1
-    hoat_dong[user_id]["hanh_dong"].append(hanh_dong)
-    CoSoDuLieu.luu(hoat_dong, 'hoat_dong')
+    activity[user_id]["last_seen"] = now
+    activity[user_id]["request_count"] += 1
+    activity[user_id]["actions"].append(action)
+    Database.save(activity, 'activity')
 
-def tao_ma_moi_ban(user_id):
-    ma = f"MOI1NGAY_{user_id}_{int(time.time())}"
-    tao_ma_vip(ma, 1, 1)
-    return ma
+def create_referral_code(user_id):
+    code = f"REF1DAY_{user_id}_{int(time.time())}"
+    create_premium_code(code, 1, 1)
+    return code
 
-def theo_doi_moi_ban(nguoi_moi_id, nguoi_duoc_moi_id):
-    nguoi_moi_id = str(nguoi_moi_id)
-    nguoi_duoc_moi_id = str(nguoi_duoc_moi_id)
+def track_referral(referrer_id, referred_id):
+    referrer_id = str(referrer_id)
+    referred_id = str(referred_id)
     
-    if nguoi_moi_id not in moi_ban_db:
-        moi_ban_db[nguoi_moi_id] = []
+    if referrer_id not in referral_db:
+        referral_db[referrer_id] = []
     
-    if nguoi_duoc_moi_id not in moi_ban_db[nguoi_moi_id]:
-        moi_ban_db[nguoi_moi_id].append(nguoi_duoc_moi_id)
-        CoSoDuLieu.luu(moi_ban_db, 'moi_ban')
+    if referred_id not in referral_db[referrer_id]:
+        referral_db[referrer_id].append(referred_id)
+        Database.save(referral_db, 'referral')
         
-        ma_thuong = tao_ma_moi_ban(nguoi_moi_id)
+        reward_code = create_referral_code(referrer_id)
         try:
             bot.send_message(
-                nguoi_moi_id,
+                referrer_id,
                 f"""
-{BIỂU_TƯỢNG['thanh_cong']} <b>Mời Bạn Thành Công!</b>
-{BIỂU_TƯỢNG['nguoi_dung']} Bạn đã mời ID {nguoi_duoc_moi_id}!
-{BIỂU_TƯỢNG['moi']} Mã thưởng: <code>{ma_thuong}</code>
-{BIỂU_TƯỢNG['thong_tin']} Dùng: /ma {ma_thuong}
+{ICONS['success']} Chúc mừng bạn đã mời thành công ID {referred_id}!
+🔑 Mã thưởng: <code>{reward_code}</code>
+📋 Sử dụng: /code {reward_code}
                 """,
                 parse_mode="HTML"
             )
         except:
             pass
 
-def kiem_tra_vip_kich_hoat(user_id):
-    user_id = str(user_id)
-    if user_id in nguoi_dung and nguoi_dung[user_id].get("vip_kich_hoat", False):
-        het_han = nguoi_dung[user_id].get("vip_het_han", "N/A")
-        try:
-            if datetime.now() <= datetime.strptime(het_han, "%Y-%m-%d %H:%M:%S"):
-                return True
-        except:
-            return False
-    return False
-
 # ==============================================
-# ĐỘNG CƠ PHÂN TÍCH MD5
+# HỆ THỐNG PHÂN TÍCH MD5
 # ==============================================
-class PhanTichMD5:
+class MD5Analyzer:
     @staticmethod
-    def dong_co_sieu_tri_tue(md5_hash):
+    def hyper_ai_engine(md5_hash):
         md5_hash = md5_hash.lower().strip()
         if len(md5_hash) != 32 or not re.match(r'^[a-f0-9]{32}$', md5_hash):
-            raise ValueError("Mã MD5 không hợp lệ!")
+            raise ValueError("MD5 không hợp lệ")
         
         hex_bytes = [int(md5_hash[i:i+2], 16) for i in range(0, len(md5_hash), 2)]
         byte_array = np.array(hex_bytes)
-        tong = sum(hex_bytes)
+        total_sum = sum(hex_bytes)
 
-        # Thuật toán 1: Hyper-AI Engine
-        tong_luong_tu = sum(byte_array[i] * math.cos(i * math.pi/16) for i in range(16))
-        diem_neural = sum(byte_array[i] * (1.618 ** (i % 5)) for i in range(16))
-        chieu_phân_hình = sum(byte_array[i] * (1 + math.sqrt(5)) / 2 for i in range(16))
-        diem1 = (tong_luong_tu + diem_neural + chieu_phân_hình) % 20
-        ket_qua1 = "TÀI" if diem1 < 10 else "XỈU"
-        xac_suat1 = 95 - abs(diem1 - 10) * 4.5 if diem1 < 10 else 50 + (diem1 - 10) * 4.5
+        # Thuật toán 1: Hyper-AI 7 Engines
+        quantum_sum = sum(byte_array[i] * math.cos(i * math.pi/16) for i in range(16))
+        neural_score = sum(byte_array[i] * (1.618 ** (i % 5)) for i in range(16))
+        fractal_dim = sum(byte_array[i] * (1 + math.sqrt(5)) / 2 for i in range(16))
+        score1 = (quantum_sum + neural_score + fractal_dim) % 20
+        result1 = "TÀI" if score1 < 10 else "XỈU"
+        prob1 = 95 - abs(score1 - 10) * 4.5 if score1 < 10 else 50 + (score1 - 10) * 4.5
 
-        # Thuật toán 2: Diamond Engine
+        # Thuật toán 2: Diamond AI 7
         nums = [int(c, 16) for c in md5_hash]
-        trung_binh = sum(nums) / 32
-        so_chan = sum(1 for n in nums if n % 2 == 0)
-        tren_8 = sum(1 for n in nums if n > 8)
-        diem2 = (1 if trung_binh > 7.5 else 0) + (1 if so_chan > 16 else 0) + (1 if tren_8 >= 10 else 0)
-        ket_qua2 = "TÀI" if diem2 >= 2 else "XỈU"
-        xac_suat2 = 90 if diem2 == 3 else 75 if diem2 == 2 else 60
-        xac_suat2 = xac_suat2 if ket_qua2 == "TÀI" else 100 - xac_suat2
+        avg = sum(nums) / 32
+        even_count = sum(1 for n in nums if n % 2 == 0)
+        over8_count = sum(1 for n in nums if n > 8)
+        score2 = (1 if avg > 7.5 else 0) + (1 if even_count > 16 else 0) + (1 if over8_count >= 10 else 0)
+        result2 = "TÀI" if score2 >= 2 else "XỈU"
+        prob2 = 90 if score2 == 3 else 75 if score2 == 2 else 60
+        prob2 = prob2 if result2 == "TÀI" else 100 - prob2
 
-        # Thuật toán 3: Titans Tech
+        # Thuật toán 3: AI-Tech Titans
         x = int(md5_hash, 16)
-        ket_qua3 = "TÀI" if x % 2 == 0 else "XỈU"
-        xac_suat3 = 75.0
+        result3 = "TÀI" if x % 2 == 0 else "XỈU"
+        prob3 = 75.0
 
-        # Kết quả cuối
-        trong_so = [0.5, 0.3, 0.2]
-        diem_cuoi = (diem1 * trong_so[0] + diem2 * 5 * trong_so[1] + (0 if ket_qua3 == "XỈU" else 10) * trong_so[2])
-        ket_qua_cuoi = "TÀI" if diem_cuoi < 10 else "XỈU"
-        xac_suat_cuoi = (xac_suat1 * trong_so[0] + xac_suat2 * trong_so[1] + xac_suat3 * trong_so[2])
+        # Kết quả cuối cùng
+        weights = [0.5, 0.3, 0.2]
+        final_score = (score1 * weights[0] + score2 * 5 * weights[1] + (0 if result3 == "XỈU" else 10) * weights[2])
+        final_result = "TÀI" if final_score < 10 else "XỈU"
+        final_prob = (prob1 * weights[0] + prob2 * weights[1] + prob3 * weights[2])
         
-        if che_do_dao:
-            ket_qua_cuoi = "XỈU" if ket_qua_cuoi == "TÀI" else "TÀI"
-            xac_suat_cuoi = 100 - xac_suat_cuoi
+        if reverse_mode:
+            final_result = "XỈU" if final_result == "TÀI" else "TÀI"
+            final_prob = 100 - final_prob
 
-        muc_do_rui_ro = "THẤP" if xac_suat_cuoi > 80 else "TRUNG BÌNH" if xac_suat_cuoi > 60 else "CAO"
+        risk_level = "THẤP" if final_prob > 80 else "TRUNG BÌNH" if final_prob > 60 else "CAO"
         
         return {
-            "tong": tong,
-            "thuattoan1": {"ket_qua": ket_qua1, "xac_suat": f"{xac_suat1:.1f}%", "diem": diem1},
-            "thuattoan2": {"ket_qua": ket_qua2, "xac_suat": f"{xac_suat2:.1f}%", "diem": diem2},
-            "thuattoan3": {"ket_qua": ket_qua3, "xac_suat": f"{xac_suat3:.1f}%", "diem": x % 2},
-            "cuoi": {"ket_qua": ket_qua_cuoi, "xac_suat": f"{xac_suat_cuoi:.1f}%"},
-            "rui_ro": muc_do_rui_ro,
-            "thoi_gian": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "da_dao": che_do_dao
+            "total_sum": total_sum,
+            "algo1": {"result": result1, "prob": f"{prob1:.1f}%", "score": score1},
+            "algo2": {"result": result2, "prob": f"{prob2:.1f}%", "score": score2},
+            "algo3": {"result": result3, "prob": f"{prob3:.1f}%", "score": x % 2},
+            "final": {"result": final_result, "prob": f"{final_prob:.1f}%"},
+            "risk": risk_level,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "reversed": reverse_mode
         }
 
 # ==============================================
-# GIAO DIỆN NGƯỜI DÙNG (THIẾT KẾ VŨ TRỤ)
+# GIAO DIỆN NGƯỜI DÙNG
 # ==============================================
-class GiaoDienNguoiDung:
+class UserInterface:
     @staticmethod
-    def tao_menu_chinh():
+    def create_main_menu():
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         markup.add(
-            types.KeyboardButton(f"{BIỂU_TƯỢNG['phan_tich']} Phân Tích MD5"),
-            types.KeyboardButton(f"{BIỂU_TƯỢNG['vip']} Trạng Thái VIP")
+            types.KeyboardButton(f"{ICONS['analyze']} Phân Tích MD5"),
+            types.KeyboardButton(f"{ICONS['vip']} Thông Tin VIP")
         )
         markup.add(
-            types.KeyboardButton(f"{BIỂU_TƯỢNG['thong_ke']} Thống Kê"),
-            types.KeyboardButton(f"{BIỂU_TƯỢNG['lich_su']} Lịch Sử")
+            types.KeyboardButton(f"{ICONS['stats']} Thống Kê"),
+            types.KeyboardButton(f"{ICONS['history']} Lịch Sử")
         )
         markup.add(
-            types.KeyboardButton(f"{BIỂU_TƯỢNG['moi_ban']} Mời Bạn"),
-            types.KeyboardButton(f"{BIỂU_TƯỢNG['tro_giup']} Trợ Giúp")
+            types.KeyboardButton(f"{ICONS['invite']} Mời Bạn"),
+            types.KeyboardButton(f"{ICONS['help']} Hỗ Trợ")
         )
         return markup
 
     @staticmethod
-    def tao_menu_tuong_tac():
-        markup = types.InlineKeyboardMarkup(row_width=2)
+    def create_inline_menu():
+        markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(
-            types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['tro_giup']} Trợ Giúp", callback_data="menu_tro_giup"),
-            types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['phan_tich']} Phân Tích", callback_data="menu_phan_tich")
+            types.InlineKeyboardButton(f"{ICONS['help']} Hỗ Trợ", callback_data="menu_help")
         )
         return markup
 
     @staticmethod
-    def tao_bao_cao_phan_tich(md5_input, phan_tich):
-        che_do = "ĐẢO" if phan_tich["da_dao"] else "BÌNH THƯỜNG"
+    def create_result_message(md5_input, analysis):
+        mode = "ĐẢO" if analysis["reversed"] else "BÌNH THƯỜNG"
         return (
-            f"🌌 <b>Hyper-AI Analysis</b> 🌌\n"
-            f"═══ Thông Tin Phân Tích ═══\n"
-            f"🪐 Version: Siêu Trí Tuệ 7 Pro\n"
-            f"🔒 MD5: <code>{md5_input[:8]}...{md5_input[-8:]}</code>\n"
-            f"📊 Tổng HEX: <code>{phan_tich['tong']}</code>\n"
-            f"⚙️ Chế độ: <code>{che_do}</code>\n"
-            f"═══ Kết Quả Thuật Toán ═══\n"
-            f"🌟 <b>Hyper-AI Engine</b>\n"
-            f"   {BIỂU_TƯỢNG['tai' if phan_tich['thuattoan1']['ket_qua'] == 'TÀI' else 'xiu']} Dự đoán: <b>{phan_tich['thuattoan1']['ket_qua']}</b>\n"
-            f"   📈 Xác suất: <code>{phan_tich['thuattoan1']['xac_suat']}</code>\n"
-            f"💎 <b>Diamond Engine</b>\n"
-            f"   {BIỂU_TƯỢNG['tai' if phan_tich['thuattoan2']['ket_qua'] == 'TÀI' else 'xiu']} Dự đoán: <b>{phan_tich['thuattoan2']['ket_qua']}</b>\n"
-            f"   📈 Xác suất: <code>{phan_tich['thuattoan2']['xac_suat']}</code>\n"
-            f"🛸 <b>Titans Tech</b>\n"
-            f"   {BIỂU_TƯỢNG['tai' if phan_tich['thuattoan3']['ket_qua'] == 'TÀI' else 'xiu']} Dự đoán: <b>{phan_tich['thuattoan3']['ket_qua']}</b>\n"
-            f"   📈 Xác suất: <code>{phan_tich['thuattoan3']['xac_suat']}</code>\n"
-            f"═══ Điểm Thuật Toán ═══\n"
-            f"🌟 Hyper-AI: <code>{phan_tich['thuattoan1']['diem']:.2f}</code>\n"
-            f"💎 Diamond: <code>{phan_tich['thuattoan2']['diem']:.2f}</code>\n"
-            f"🛸 Titans: <code>{phan_tich['thuattoan3']['diem']:.2f}</code>\n"
-            f"═══ Kết Quả Cuối ═══\n"
-            f"🎯 Dự đoán: <b>{phan_tich['cuoi']['ket_qua']}</b>\n"
-            f"📈 Độ tin cậy: <code>{phan_tich['cuoi']['xac_suat']}</code>\n"
-            f"🚨 Rủi ro: <b>{phan_tich['rui_ro']}</b>\n"
-            f"⏰ Thời gian: {phan_tich['thoi_gian']}"
+            f"╭───{ICONS['engine']} <b>HYPER-AI 7 ENGINES PRO MAX</b> ───╮\n"
+            f"│ {ICONS['info']} <b>Phiên bản:</b> HYPER-AI 7 ENGINES\n"
+            f"│ {ICONS['lock']} <b>MD5:</b> <code>{md5_input[:8]}...{md5_input[-8:]}</code>\n"
+            f"│ {ICONS['stats']} <b>Tổng HEX:</b> <code>{analysis['total_sum']}</code>\n"
+            f"│ {ICONS['engine']} <b>Chế độ:</b> <code>{mode}</code>\n"
+            f"├──────────────────────────────┤\n"
+            f"│ <b>🌌 THUẬT TOÁN HYPER-AI</b>\n"
+            f"│ {ICONS['tai' if analysis['algo1']['result'] == 'TÀI' else 'xiu']} Dự đoán: <b>{analysis['algo1']['result']}</b>\n"
+            f"│ {ICONS['stats']} Xác suất: <code>{analysis['algo1']['prob']}</code>\n"
+            f"│\n"
+            f"│ <b>🧬 THUẬT TOÁN DIAMOND AI</b>\n"
+            f"│ {ICONS['tai' if analysis['algo2']['result'] == 'TÀI' else 'xiu']} Dự đoán: <b>{analysis['algo2']['result']}</b>\n"
+            f"│ {ICONS['stats']} Xác suất: <code>{analysis['algo2']['prob']}</code>\n"
+            f"│\n"
+            f"│ <b>🦠 THUẬT TOÁN AI-TECH TITANS</b>\n"
+            f"│ {ICONS['tai' if analysis['algo3']['result'] == 'TÀI' else 'xiu']} Dự đoán: <b>{analysis['algo3']['result']}</b>\n"
+            f"│ {ICONS['stats']} Xác suất: <code>{analysis['algo3']['prob']}</code>\n"
+            f"├──────────────────────────────┤\n"
+            f"│ <b>📊 THỐNG KÊ THUẬT TOÁN</b>\n"
+            f"│ {ICONS['stats']} Hyper-AI: <code>{analysis['algo1']['score']:.2f}</code>\n"
+            f"│ {ICONS['stats']} Diamond AI: <code>{analysis['algo2']['score']:.2f}</code>\n"
+            f"│ {ICONS['stats']} AI-Tech: <code>{analysis['algo3']['score']:.2f}</code>\n"
+            f"├──────────────────────────────┤\n"
+            f"│ <b>🎯 KẾT LUẬN CUỐI CÙNG</b>\n"
+            f"│ {ICONS['tai' if analysis['final']['result'] == 'TÀI' else 'xiu']} Dự đoán: <b>{analysis['final']['result']}</b>\n"
+            f"│ {ICONS['stats']} Xác suất: <code>{analysis['final']['prob']}</code>\n"
+            f"│ {ICONS['risk']} Rủi ro: <b>{analysis['risk']}</b>\n"
+            f"│ {ICONS['time']} Thời gian: {analysis['timestamp']}\n"
+            f"╰──────────────────────────────╯"
         )
 
 # ==============================================
 # QUẢN LÝ DỮ LIỆU
 # ==============================================
-def luu_du_doan(user_id, md5, phan_tich, la_dung=None):
+def save_prediction(user_id, md5, analysis, is_correct=None):
     user_id = str(user_id)
-    lich_su[user_id] = lich_su.get(user_id, [])
-    lich_su[user_id].append({
+    history[user_id] = history.get(user_id, [])
+    history[user_id].append({
         "md5": md5,
-        "du_doan": phan_tich,
-        "thoi_gian": phan_tich["thoi_gian"],
-        "la_dung": la_dung,
-        "cho_phan_hoi": True if la_dung is None else False
+        "prediction": analysis,
+        "timestamp": analysis["timestamp"],
+        "is_correct": is_correct,
+        "awaiting_feedback": True if is_correct is None else False
     })
-    if len(lich_su[user_id]) > 100:
-        lich_su[user_id] = lich_su[user_id][-100:]
-    CoSoDuLieu.luu(lich_su, 'lich_su')
+    if len(history[user_id]) > 100:
+        history[user_id] = history[user_id][-100:]
+    Database.save(history, 'history')
 
-def kiem_tra_trang_thai_phan_hoi(user_id):
+def check_feedback_status(user_id):
     user_id = str(user_id)
-    if user_id in lich_su:
-        for muc in lich_su[user_id]:
-            if muc.get("cho_phan_hoi", False):
-                return True, muc["md5"]
+    if user_id in history:
+        for entry in history[user_id]:
+            if entry.get("awaiting_feedback", False):
+                return True, entry["md5"]
     return False, None
 
-def lay_thong_ke_nguoi_dung(user_id):
+def get_user_stats(user_id):
     user_id = str(user_id)
-    if user_id not in lich_su or not lich_su[user_id]:
+    if user_id not in history or not history[user_id]:
         return None
-    lich_su_nguoi_dung = lich_su[user_id]
-    tong = len(lich_su_nguoi_dung)
-    dung = sum(1 for muc in lich_su_nguoi_dung if muc.get("la_dung") is True)
-    sai = sum(1 for muc in lich_su_nguoi_dung if muc.get("la_dung") is False)
-    do_chinh_xac = dung / tong * 100 if tong > 0 else 0
+    user_history = history[user_id]
+    total = len(user_history)
+    correct = sum(1 for entry in user_history if entry.get("is_correct") is True)
+    wrong = sum(1 for entry in user_history if entry.get("is_correct") is False)
+    accuracy = correct / total * 100 if total > 0 else 0
     return {
-        "tong": tong,
-        "dung": dung,
-        "sai": sai,
-        "do_chinh_xac": do_chinh_xac
+        "total": total,
+        "correct": correct,
+        "wrong": wrong,
+        "accuracy": accuracy
     }
 
 # ==============================================
-# PHẢN HỒI ĐỘNG
+# HÀM PHẢN HỒI VỚI REACTION VÀ TYPING
 # ==============================================
-async def gui_phan_hoi_voi_emoji(chat_id, tin_nhan, noi_dung, reply_markup=None):
-    tin_nhan_bieu_tuong = await bot.send_message(chat_id, random.choice(PHAN_HOI_EMOJI), reply_to_message_id=tin_nhan.message_id)
-    await bot.send_chat_action(chat_id, 'typing')
-    await asyncio.sleep(random.uniform(0.5, 1.5))
-    random_emoji = random.choice(PHAN_HOI_EMOJI)
-    await bot.send_message(
+def send_response_with_reaction_and_typing(chat_id, message, response_text, reply_markup=None):
+    # Gửi reaction (emoji) ngay sau tin nhắn người dùng
+    reaction_emoji = random.choice(REACTION_EMOJIS)
+    reaction_msg = bot.send_message(chat_id, reaction_emoji, reply_to_message_id=message.message_id)
+
+    # Xóa tin nhắn emoji sau 1 giây
+    def delete_reaction():
+        time.sleep(1)
+        try:
+            bot.delete_message(chat_id, reaction_msg.message_id)
+        except Exception as e:
+            print(f"Lỗi xóa emoji: {e}")
+
+    threading.Thread(target=delete_reaction).start()
+
+    # Hiển thị trạng thái "đang nhập"
+    bot.send_chat_action(chat_id, 'typing')
+    time.sleep(random.uniform(0.5, 1.5))  # Độ trễ ngẫu nhiên để giống người
+
+    # Gửi phản hồi chính
+    random_icon = random.choice(RESPONSE_ICONS)
+    bot.send_message(
         chat_id,
-        f"{random_emoji} {noi_dung}",
+        f"{random_icon} {response_text}",
         parse_mode="HTML",
         reply_markup=reply_markup,
-        reply_to_message_id=tin_nhan.message_id
+        reply_to_message_id=message.message_id
     )
-    await asyncio.sleep(2)
-    try:
-        await bot.delete_message(chat_id, tin_nhan_bieu_tuong.message_id)
-    except:
-        pass
 
-def gui_phan_hoi_dong_bo(chat_id, tin_nhan, noi_dung, reply_markup=None):
-    asyncio.run(gui_phan_hoi_voi_emoji(chat_id, tin_nhan, noi_dung, reply_markup))
 
 # ==============================================
 # XỬ LÝ LỆNH
 # ==============================================
 @bot.message_handler(commands=['start'])
-def xu_ly_bat_dau(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
+def handle_start(message):
+    if len(message.text.split()) > 1:
+        referrer_id = message.text.split()[1]
+        if referrer_id != str(message.from_user.id):
+            track_referral(referrer_id, message.from_user.id)
     
-    if len(tin_nhan.text.split()) > 1:
-        nguoi_moi_id = tin_nhan.text.split()[1]
-        if nguoi_moi_id != str(tin_nhan.from_user.id):
-            theo_doi_moi_ban(nguoi_moi_id, tin_nhan.from_user.id)
-    
-    ten = tin_nhan.from_user.first_name or "Nhà Thám Hiểm"
+    name = message.from_user.first_name or "Người Dùng"
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['nhom']} Xác Minh Nhóm", callback_data="xác_minh_nhóm"))
-    noi_dung = (
-        f"🌌 <b>Chào {ten}!</b> 🌌\n"
-        f"═══ Bắt Đầu Hành Trình ═══\n"
-        f"🚀 Tham gia nhóm để nhận <b>VIP 7 ngày miễn phí</b>!\n"
-        f"{''.join(f'{BIỂU_TƯỢNG['nhom']} {nhom}\n' for nhom in NHOM_YEU_CAU)}"
-        f"🪐 Nhấn nút để xác minh và nhận mã!"
+    markup.add(types.InlineKeyboardButton(f"{ICONS['success']} Xác Nhận Nhóm", callback_data="verify_groups"))
+    response_text = (
+        f"╭─── <b>Chào Mừng {name}!</b> ───╮\n"
+        f"│ {ICONS['info']} Tham gia các nhóm để nhận <b>VIP 7 ngày miễn phí</b>!\n"
+        f"│ 👥 @techtitansteam\n"
+        f"│ 👥 @techtitansteamchat\n"
+        f"│ {ICONS['help']} Nhấn nút để xác nhận và nhận mã!\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, markup)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "bắt_đầu")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text, markup)
+    track_activity(message.from_user.id, "start")
 
-@bot.message_handler(commands=['ma'])
-def xu_ly_ma(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['code'])
+def handle_code(message):
+    parts = message.text.split()
+    if len(parts) != 2:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Cú pháp: /code [mã]\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    
-    phan = tin_nhan.text.split()
-    if len(phan) != 2:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /ma [mã]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    thanh_cong, thong_bao = su_dung_ma_vip(phan[1].upper(), tin_nhan.from_user.id)
-    noi_dung = (
-        f"🌌 <b>Kích Hoạt VIP</b> 🌌\n"
-        f"═══ Kết Quả ═══\n"
-        f"{thong_bao}"
+    success, msg = use_premium_code(parts[1].upper(), message.from_user.id)
+    response_text = (
+        f"╭─── {ICONS['vip']} <b>Kích Hoạt VIP</b> ───╮\n"
+        f"│ {msg}\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"sử_dụng_mã:{phan[1]}")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"use_code:{parts[1]}")
 
-@bot.message_handler(commands=['admin'])
-def xu_ly_admin(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['ban'])
+def handle_ban(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    noi_dung = (
-        f"🌌 <b>Admin Control Panel</b> 🌌\n"
-        f"═══ Lệnh Quản Trị ═══\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /cam [user_id] - Cấm người dùng\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /bo_cam [user_id] - Bỏ cấm người dùng\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /thong_tin_nguoi_dung [user_id] - Xem thông tin người dùng\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /kich_hoat [id] [ngày] - Kích hoạt VIP\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /huy_kich_hoat [id] - Hủy VIP\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /tao_ma [mã] [ngày] [lượt] - Tạo mã VIP\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /danh_sach_ma - Xem danh sách mã VIP\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /gui [thông_điệp] - Phát tin nhắn\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /thong_ke - Thống kê hệ thống\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /dao - Bật/tắt chế độ đảo\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /danh_sach_nguoi_dung - Xem danh sách người dùng\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /xoa_lich_su [user_id] - Xóa lịch sử người dùng\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /onserver - Bật bot cho tất cả\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} /stopserver - Tắt bot với người dùng thường"
-    )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "admin")
-
-@bot.message_handler(commands=['onserver'])
-def xu_ly_onserver(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+    parts = message.text.split()
+    if len(parts) != 2:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Cú pháp: /ban [user_id]\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    global SERVER_TRANG_THAI
-    SERVER_TRANG_THAI = True
-    cau_hinh_db['server_trang_thai'] = SERVER_TRANG_THAI
-    CoSoDuLieu.luu(cau_hinh_db, 'cau_hinh')
-    noi_dung = (
-        f"🌌 <b>Server Status</b> 🌌\n"
-        f"═══ Kết Quả ═══\n"
-        f"{BIỂU_TƯỢNG['thanh_cong']} Bot đã được bật cho tất cả người dùng!"
-    )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "bật_server")
-
-@bot.message_handler(commands=['stopserver'])
-def xu_ly_stopserver(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    global SERVER_TRANG_THAI
-    SERVER_TRANG_THAI = False
-    cau_hinh_db['server_trang_thai'] = SERVER_TRANG_THAI
-    CoSoDuLieu.luu(cau_hinh_db, 'cau_hinh')
-    noi_dung = (
-        f"🌌 <b>Server Status</b> 🌌\n"
-        f"═══ Kết Quả ═══\n"
-        f"{BIỂU_TƯỢNG['thanh_cong']} Bot đã tắt với người dùng thường!\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Admin vẫn có thể sử dụng."
-    )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "tắt_server")
-
-@bot.message_handler(commands=['quan_tri'])
-def xu_ly_quan_tri(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    noi_dung = (
-        f"🌌 <b>Admin Control Panel</b> 🌌\n"
-        f"═══ Lệnh Quản Trị ═══\n"
-        f"{BIỂU_TƯỢNG['quan_tri']} Dùng /admin để xem danh sách lệnh đầy đủ!"
-    )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "quan_tri")
-
-@bot.message_handler(commands=['cam'])
-def xu_ly_cam(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    phan = tin_nhan.text.split()
-    if len(phan) != 2:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /cam [user_id]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    uid = phan[1]
-    nguoi_dung[uid] = nguoi_dung.get(uid, {})
-    nguoi_dung[uid]["bi_cam"] = True
-    CoSoDuLieu.luu(nguoi_dung, 'nguoi_dung')
+    uid = parts[1]
+    users[uid] = users.get(uid, {})
+    users[uid]["banned"] = True
+    Database.save(users, 'users')
     try:
-        bot.send_message(uid, f"🌌 <b>Bị Cấm!</b> 🌌\n═══ Thông Báo ═══\n{BIỂU_TƯỢNG['loi']} Tài khoản của bạn đã bị cấm!", parse_mode="HTML")
+        bot.send_message(uid, f"{random.choice(RESPONSE_ICONS)} {ICONS['error']} Tài khoản của bạn đã bị cấm!", parse_mode="HTML")
     except:
         pass
-    noi_dung = (
-        f"🌌 <b>Quản Lý Người Dùng</b> 🌌\n"
-        f"═══ Kết Quả ═══\n"
-        f"{BIỂU_TƯỢNG['thanh_cong']} Đã cấm ID <code>{uid}</code>"
+    response_text = (
+        f"╭─── {ICONS['admin']} <b>Quản Lý</b> ───╮\n"
+        f"│ {ICONS['success']} Đã cấm người dùng <code>{uid}</code>\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"cấm:{uid}")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"ban:{uid}")
 
-@bot.message_handler(commands=['bo_cam'])
-def xu_ly_bo_cam(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['unban'])
+def handle_unban(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    phan = tin_nhan.text.split()
-    if len(phan) != 2:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /bo_cam [user_id]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+    parts = message.text.split()
+    if len(parts) != 2:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Cú pháp: /unban [user_id]\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    uid = phan[1]
-    if uid in nguoi_dung:
-        nguoi_dung[uid]["bi_cam"] = False
-        CoSoDuLieu.luu(nguoi_dung, 'nguoi_dung')
+    uid = parts[1]
+    if uid in users:
+        users[uid]["banned"] = False
+        Database.save(users, 'users')
         try:
-            bot.send_message(uid, f"🌌 <b>Đã Bỏ Cấm!</b> 🌌\n═══ Thông Báo ═══\n{BIỂU_TƯỢNG['thanh_cong']} Tài khoản của bạn đã được bỏ cấm!", parse_mode="HTML")
+            bot.send_message(uid, f"{random.choice(RESPONSE_ICONS)} {ICONS['success']} Tài khoản của bạn đã được bỏ cấm!", parse_mode="HTML")
         except:
             pass
-        noi_dung = (
-            f"🌌 <b>Quản Lý Người Dùng</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['thanh_cong']} Đã bỏ cấm ID <code>{uid}</code>"
+        response_text = (
+            f"╭─── {ICONS['admin']} <b>Quản Lý</b> ───╮\n"
+            f"│ {ICONS['success']} Đã bỏ cấm người dùng <code>{uid}</code>\n"
+            f"╰────────────────────────────╯"
         )
     else:
-        noi_dung = (
-            f"🌌 <b>Quản Lý Người Dùng</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} ID <code>{uid}</code> không tồn tại!"
+        response_text = (
+            f"╭─── {ICONS['admin']} <b>Quản Lý</b> ───╮\n"
+            f"│ {ICONS['error']} Không tìm thấy người dùng <code>{uid}</code>\n"
+            f"╰────────────────────────────╯"
         )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"bỏ_cấm:{uid}")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"unban:{uid}")
 
-@bot.message_handler(commands=['thong_tin_nguoi_dung'])
-def xu_ly_thong_tin_nguoi_dung(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['userinfo'])
+def handle_userinfo(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    phan = tin_nhan.text.split()
-    if len(phan) != 2:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /thong_tin_nguoi_dung [user_id]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+    parts = message.text.split()
+    if len(parts) != 2:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Cú pháp: /userinfo [user_id]\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    uid = phan[1]
-    if uid not in nguoi_dung:
-        noi_dung = (
-            f"🌌 <b>Thông Tin Người Dùng</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} ID <code>{uid}</code> không tồn tại!"
+    uid = parts[1]
+    if uid not in users:
+        response_text = (
+            f"╭─── {ICONS['user']} <b>Thông Tin Người Dùng</b> ───╮\n"
+            f"│ {ICONS['error']} Không tìm thấy người dùng <code>{uid}</code>\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    nguoi = nguoi_dung[uid]
-    thong_ke = lay_thong_ke_nguoi_dung(uid)
-    thong_bao_thong_ke = (
-        f"{BIỂU_TƯỢNG['thong_ke']} Thống kê:\n"
-        f"   {BIỂU_TƯỢNG['dung']} Đúng: <code>{thong_ke['dung']}</code>\n"
-        f"   {BIỂU_TƯỢNG['sai']} Sai: <code>{thong_ke['sai']}</code>\n"
-        f"   {BIỂU_TƯỢNG['thong_ke']} Độ chính xác: <code>{thong_ke['do_chinh_xac']:.2f}%</code>"
-    ) if thong_ke else f"{BIỂU_TƯỢNG['thong_tin']} Không có thống kê"
-    noi_dung = (
-        f"🌌 <b>User Info</b> 🌌\n"
-        f"═══ Thông Tin Người Dùng ═══\n"
-        f"{BIỂU_TƯỢNG['nguoi_dung']} ID: <code>{uid}</code>\n"
-        f"{BIỂU_TƯỢNG['vip']} VIP: <code>{'Kích hoạt' if nguoi.get('vip_kich_hoat') else 'Không hoạt động'}</code>\n"
-        f"{BIỂU_TƯỢNG['dong_ho']} Hết hạn: <code>{nguoi.get('vip_het_han', 'N/A')}</code>\n"
-        f"{BIỂU_TƯỢNG['khoa']} Bị cấm: <code>{'Có' if nguoi.get('bi_cam') else 'Không'}</code>\n"
-        f"{thong_bao_thong_ke}"
+    user = users[uid]
+    stats = get_user_stats(uid)
+    stats_msg = f"""
+│ {ICONS['stats']} Thống kê:\n
+│ {ICONS['correct']} Đúng: <code>{stats['correct']}</code>\n
+│ {ICONS['wrong']} Sai: <code>{stats['wrong']}</code>\n
+│ {ICONS['stats']} Chính xác: <code>{stats['accuracy']:.2f}%</code>
+    """ if stats else f"│ {ICONS['info']} Chưa có thống kê"
+    response_text = (
+        f"╭─── {ICONS['user']} <b>Thông Tin Người Dùng</b> ───╮\n"
+        f"│ {ICONS['user']} ID: <code>{uid}</code>\n"
+        f"│ {ICONS['vip']} VIP: <code>{'✅ Có' if user.get('vip_active') else '❌ Không'}</code>\n"
+        f"│ {ICONS['clock']} Hết hạn: <code>{user.get('vip_expire', 'N/A')}</code>\n"
+        f"│ {ICONS['warning']} Banned: <code>{'✅ Có' if user.get('banned') else '❌ Không'}</code>\n"
+        f"{stats_msg}\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"thông_tin_nguoi_dung:{uid}")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"userinfo:{uid}")
 
-@bot.message_handler(commands=['danh_sach_nguoi_dung'])
-def xu_ly_danh_sach_nguoi_dung(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    if not nguoi_dung:
-        noi_dung = (
-            f"🌌 <b>User List</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Không tìm thấy người dùng nào!"
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    danh_sach = [f"🌌 <b>User List</b> 🌌\n═══ Danh Sách Người Dùng ═══"]
-    for uid, chi_tiet in nguoi_dung.items():
-        trang_thai_vip = "Kích hoạt" if chi_tiet.get("vip_kich_hoat") else "Không hoạt động"
-        trang_thai_cam = "Bị cấm" if chi_tiet.get("bi_cam") else "Hoạt động"
-        danh_sach.append(
-            f"{BIỂU_TƯỢNG['nguoi_dung']} ID: <code>{uid}</code> | {BIỂU_TƯỢNG['vip']} {trang_thai_vip} | {BIỂU_TƯỢNG['khoa']} {trang_thai_cam}"
-        )
-    noi_dung = "\n".join(danh_sach)
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "danh_sach_nguoi_dung")
-
-@bot.message_handler(commands=['xoa_lich_su'])
-def xu_ly_xoa_lich_su(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    phan = tin_nhan.text.split()
-    if len(phan) != 2:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /xoa_lich_su [user_id]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    uid = phan[1]
-    if uid in lich_su:
-        del lich_su[uid]
-        CoSoDuLieu.luu(lich_su, 'lich_su')
-        noi_dung = (
-            f"🌌 <b>Quản Lý Lịch Sử</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['thanh_cong']} Đã xóa lịch sử của ID <code>{uid}</code>"
-        )
-    else:
-        noi_dung = (
-            f"🌌 <b>Quản Lý Lịch Sử</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Không tìm thấy lịch sử cho ID <code>{uid}</code>"
-        )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"xóa_lịch_sử:{uid}")
-
-@bot.message_handler(commands=['tro_giup'])
-def xu_ly_tro_giup(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    noi_dung = (
-        f"🌌 <b>Hướng Dẫn Sử Dụng</b> 🌌\n"
-        f"═══ Lệnh Người Dùng ═══\n"
-        f"{BIỂU_TƯỢNG['phan_tich']} /start - Bắt đầu & nhận VIP\n"
-        f"{BIỂU_TƯỢNG['vip']} /ma [mã] - Kích hoạt VIP\n"
-        f"{BIỂU_TƯỢNG['thong_ke']} /thong_ke - Xem thống kê cá nhân\n"
-        f"{BIỂU_TƯỢNG['lich_su']} /lich_su - Xem lịch sử dự đoán\n"
-        f"{BIỂU_TƯỢNG['moi_ban']} /moi - Mời bạn bè\n"
-        f"{BIỂU_TƯỢNG['tro_giup']} /tro_giup - Hiển thị hướng dẫn\n"
-        f"{BIỂU_TƯỢNG['nguoi_dung']} /id - Xem thông tin tài khoản\n"
-        f"{BIỂU_TƯỢNG['phan_tich']} Gửi mã MD5 32 ký tự để phân tích\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
+@bot.message_handler(commands=['help'])
+def handle_help(message):
+    response_text = (
+        f"╭─── {ICONS['help']} <b>Hướng Dẫn Sử Dụng</b> ───╮\n"
+        f"│ {ICONS['analyze']} /start - Bắt đầu và nhận mã VIP\n"
+        f"│ {ICONS['vip']} /code [mã] - Kích hoạt VIP\n"
+        f"│ {ICONS['stats']} /stats - Xem thống kê cá nhân\n"
+        f"│ {ICONS['history']} /history - Xem lịch sử dự đoán\n"
+        f"│ {ICONS['invite']} /invite - Mời bạn bè\n"
+        f"│ {ICONS['help']} /help - Hiển thị hướng dẫn\n"
+        f"│ {ICONS['user']} /id - Xem thông tin tài khoản\n"
+        f"│ {ICONS['info']} Gửi mã MD5 32 ký tự để phân tích\n"
+        f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "trợ_giúp")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+    track_activity(message.from_user.id, "help")
 
 @bot.message_handler(commands=['id'])
-def xu_ly_id(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    uid = str(tin_nhan.from_user.id)
-    ten = tin_nhan.from_user.first_name or "Không Tên"
-    trang_thai = "Không hoạt động"
-    bieu_tuong_trang_thai = BIỂU_TƯỢNG["khoa"]
-    het_han_str = "N/A"
-    if uid in nguoi_dung and nguoi_dung[uid].get("vip_kich_hoat", False):
-        het_han_str = nguoi_dung[uid].get("vip_het_han", "N/A")
-        if datetime.now() <= datetime.strptime(het_han_str, "%Y-%m-%d %H:%M:%S"):
-            trang_thai = "Kích hoạt"
-            bieu_tuong_trang_thai = BIỂU_TƯỢNG["vip"]
+def handle_id(message):
+    uid = str(message.from_user.id)
+    name = message.from_user.first_name or "Không có tên"
+    status = "❌ Chưa kích hoạt"
+    status_icon = ICONS["lock"]
+    expire_str = "N/A"
+    if uid in users and users[uid].get("vip_active", False):
+        expire_str = users[uid].get("vip_expire", "N/A")
+        if datetime.now() <= datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S"):
+            status = "✅ Đã kích hoạt"
+            status_icon = ICONS["vip"]
         else:
-            trang_thai = "Hết hạn"
-            bieu_tuong_trang_thai = BIỂU_TƯỢNG["dong_ho"]
-    so_lan_moi = len(moi_ban_db.get(uid, []))
-    thong_ke = lay_thong_ke_nguoi_dung(uid)
-    thong_bao_thong_ke = (
-        f"{BIỂU_TƯỢNG['thong_ke']} Thống kê:\n"
-        f"   {BIỂU_TƯỢNG['dung']} Đúng: <code>{thong_ke['dung']}</code>\n"
-        f"   {BIỂU_TƯỢNG['sai']} Sai: <code>{thong_ke['sai']}</code>\n"
-        f"   {BIỂU_TƯỢNG['thong_ke']} Độ chính xác: <code>{thong_ke['do_chinh_xac']:.2f}%</code>"
-    ) if thong_ke else f"{BIỂU_TƯỢNG['thong_tin']} Không có thống kê"
-    noi_dung = (
-        f"🌌 <b>User Profile</b> 🌌\n"
-        f"═══ Thông Tin Tài Khoản ═══\n"
-        f"{BIỂU_TƯỢNG['nguoi_dung']} Tên: <code>{ten}</code>\n"
-        f"{BIỂU_TƯỢNG['nguoi_dung']} ID: <code>{uid}</code>\n"
-        f"{bieu_tuong_trang_thai} VIP: <code>{trang_thai}</code>\n"
-        f"{BIỂU_TƯỢNG['dong_ho']} Hết hạn: <code>{het_han_str}</code>\n"
-        f"{BIỂU_TƯỢNG['moi_ban']} Lượt mời: <code>{so_lan_moi}</code>\n"
-        f"{thong_bao_thong_ke}\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
+            status = "❌ Hết hạn"
+            status_icon = ICONS["clock"]
+    ref_count = len(referral_db.get(uid, []))
+    stats = get_user_stats(uid)
+    stats_msg = f"""
+│ {ICONS['stats']} Thống kê:\n
+│ {ICONS['correct']} Đúng: <code>{stats['correct']}</code>\n
+│ {ICONS['wrong']} Sai: <code>{stats['wrong']}</code>\n
+│ {ICONS['stats']} Chính xác: <code>{stats['accuracy']:.2f}%</code>
+    """ if stats else f"│ {ICONS['info']} Chưa có thống kê"
+    response_text = (
+        f"╭─── {ICONS['user']} <b>Thông Tin Tài Khoản</b> ───╮\n"
+        f"│ {ICONS['user']} Tên: <code>{name}</code>\n"
+        f"│ {ICONS['user']} ID: <code>{uid}</code>\n"
+        f"│ {status_icon} Trạng thái VIP: <code>{status}</code>\n"
+        f"│ {ICONS['clock']} Hết hạn: <code>{expire_str}</code>\n"
+        f"│ {ICONS['invite']} Lượt mời: <code>{ref_count}</code>\n"
+        f"{stats_msg}\n"
+        f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "id")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+    track_activity(message.from_user.id, "id")
 
-@bot.message_handler(commands=['thong_ke'])
-def xu_ly_thong_ke(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['stats'])
+def handle_stats(message):
+    stats = get_user_stats(message.from_user.id)
+    if not stats:
+        response_text = (
+            f"╭─── {ICONS['stats']} <b>Thống Kê Cá Nhân</b> ───╮\n"
+            f"│ {ICONS['info']} Bạn chưa có thống kê!\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
         return
-    thong_ke = lay_thong_ke_nguoi_dung(tin_nhan.from_user.id)
-    if not thong_ke:
-        noi_dung = (
-            f"🌌 <b>Personal Stats</b> 🌌\n"
-            f"═══ Thống Kê Cá Nhân ═══\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Không có thống kê!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-        return
-    noi_dung = (
-        f"🌌 <b>Personal Stats</b> 🌌\n"
-        f"═══ Thống Kê Cá Nhân ═══\n"
-        f"{BIỂU_TƯỢNG['dung']} Đúng: <code>{thong_ke['dung']}</code>\n"
-        f"{BIỂU_TƯỢNG['sai']} Sai: <code>{thong_ke['sai']}</code>\n"
-        f"{BIỂU_TƯỢNG['thong_ke']} Tổng: <code>{thong_ke['tong']}</code>\n"
-        f"{BIỂU_TƯỢNG['thong_ke']} Độ chính xác: <code>{thong_ke['do_chinh_xac']:.2f}%</code>\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
+    response_text = (
+        f"╭─── {ICONS['stats']} <b>Thống Kê Cá Nhân</b> ───╮\n"
+        f"│ {ICONS['correct']} Dự đoán đúng: <code>{stats['correct']}</code>\n"
+        f"│ {ICONS['wrong']} Dự đoán sai: <code>{stats['wrong']}</code>\n"
+        f"│ {ICONS['stats']} Tổng dự đoán: <code>{stats['total']}</code>\n"
+        f"│ {ICONS['stats']} Tỷ lệ chính xác: <code>{stats['accuracy']:.2f}%</code>\n"
+        f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "thống_kê")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+    track_activity(message.from_user.id, "stats")
 
-@bot.message_handler(commands=['lich_su'])
-def xu_ly_lich_su(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['history'])
+def handle_history(message):
+    uid = str(message.from_user.id)
+    if uid not in history or not history[uid]:
+        response_text = (
+            f"╭─── {ICONS['history']} <b>Lịch Sử Dự Đoán</b> ───╮\n"
+            f"│ {ICONS['info']} Bạn chưa có lịch sử dự đoán!\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
         return
-    uid = str(tin_nhan.from_user.id)
-    if uid not in lich_su or not lich_su[uid]:
-        noi_dung = (
-            f"🌌 <b>Prediction History</b> 🌌\n"
-            f"═══ Lịch Sử Dự Đoán ═══\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Không có lịch sử dự đoán!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-        return
-    lich_su_nguoi_dung = lich_su[uid][-10:]
-    thong_bao_lich_su = [f"🌌 <b>Prediction History (Top 10)</b> 🌌\n═══ Lịch Sử Dự Đoán ═══"]
-    for idx, muc in enumerate(reversed(lich_su_nguoi_dung), 1):
-        md5_ngan = f"{muc['md5'][:4]}...{muc['md5'][-4:]}"
-        ket_qua = muc.get('du_doan', {}).get('cuoi', {}).get('ket_qua', 'N/A')
-        thoi_gian_str = datetime.strptime(muc['thoi_gian'], "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
-        phan_hoi = BIỂU_TƯỢNG['dung'] if muc.get('la_dung') is True else BIỂU_TƯỢNG['sai'] if muc.get('la_dung') is False else ""
-        thong_bao_lich_su.append(f"{idx}. <code>{md5_ngan}</code> → <b>{ket_qua}</b> {phan_hoi} | {thoi_gian_str}")
-    noi_dung = "\n".join(thong_bao_lich_su)
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "lịch_sử")
+    user_history = history[uid][-10:]
+    history_msg = [f"╭─── {ICONS['history']} <b>Lịch Sử Dự Đoán (Top 10)</b> ───╮"]
+    for idx, entry in enumerate(reversed(user_history), 1):
+        md5_short = f"{entry['md5'][:4]}...{entry['md5'][-4:]}"
+        result = entry.get('prediction', {}).get('final', {}).get('result', 'N/A')
+        time_str = datetime.strptime(entry['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
+        feedback = ICONS['correct'] if entry.get('is_correct') is True else ICONS['wrong'] if entry.get('is_correct') is False else ""
+        history_msg.append(f"│ {idx}. <code>{md5_short}</code> → <b>{result}</b> {feedback} | {time_str}")
+    history_msg.append(f"╰────────────────────────────╯")
+    response_text = "\n".join(history_msg)
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+    track_activity(message.from_user.id, "history")
 
-@bot.message_handler(commands=['moi'])
-def xu_ly_moi(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    user_id = tin_nhan.from_user.id
-    lien_ket_moi = f"https://t.me/{TEN_BOT}?start={user_id}"
-    noi_dung = (
-        f"🌌 <b>Invite Friends</b> 🌌\n"
-        f"═══ Mời Bạn Bè ═══\n"
-        f"{BIỂU_TƯỢNG['moi_ban']} Link mời: <code>{lien_ket_moi}</code>\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Mời 1 bạn nhận VIP 1 ngày!\n"
-        f"{BIỂU_TƯỢNG['moi_ban']} Tổng lượt mời: <code>{len(moi_ban_db.get(str(user_id), []))}</code>\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
+@bot.message_handler(commands=['invite'])
+def handle_invite(message):
+    user_id = message.from_user.id
+    invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+    response_text = (
+        f"╭─── {ICONS['invite']} <b>Mời Bạn Bè</b> ───╮\n"
+        f"│ {ICONS['invite']} Link mời: <code>{invite_link}</code>\n"
+        f"│ {ICONS['info']} Mời 1 người để nhận mã VIP 1 ngày!\n"
+        f"│ {ICONS['invite']} Tổng lượt mời: <code>{len(referral_db.get(str(user_id), []))}</code>\n"
+        f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "mời")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+    track_activity(message.from_user.id, "invite")
 
 @bot.message_handler(commands=['dao'])
-def xu_ly_dao(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+def handle_dao(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    global che_do_dao
-    che_do_dao = not che_do_dao
-    cau_hinh_db['che_do_dao'] = che_do_dao
-    CoSoDuLieu.luu(cau_hinh_db, 'cau_hinh')
-    trang_thai = "BẬT" if che_do_dao else "TẮT"
-    noi_dung = (
-        f"🌌 <b>Reverse Mode</b> 🌌\n"
-        f"═══ Kết Quả ═══\n"
-        f"{BIỂU_TƯỢNG['thanh_cong']} Chế độ đảo: <code>{trang_thai}</code>"
+    global reverse_mode
+    reverse_mode = not reverse_mode
+    Database.save({'reverse_mode': reverse_mode}, 'config')
+    status = "BẬT" if reverse_mode else "TẮT"
+    response_text = (
+        f"╭─── {ICONS['admin']} <b>Chế Độ Đảo</b> ───╮\n"
+        f"│ {ICONS['success']} Chế độ đảo: <code>{status}</code>\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"chế_độ_đảo:{trang_thai}")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"reverse_mode:{status}")
 
-@bot.message_handler(commands=['tao_ma'])
-def xu_ly_tao_ma(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['taocode'])
+def handle_create_code(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    phan = tin_nhan.text.split()
-    if len(phan) != 4:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /tao_ma [mã] [ngày] [lượt]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+    parts = message.text.split()
+    if len(parts) != 4:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Cú pháp: /taocode [mã] [ngày] [lần]\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    ma_ten = phan[1].upper()
-    ngay = int(phan[2])
-    so_lan_su_dung_toi_da = int(phan[3])
-    tao_ma_vip(ma_ten, ngay, so_lan_su_dung_toi_da)
-    noi_dung = (
-        f"🌌 <b>Create VIP Code</b> 🌌\n"
-        f"═══ Kết Quả ═══\n"
-        f"{BIỂU_TƯỢNG['thanh_cong']} Đã tạo mã <code>{ma_ten}</code>!\n"
-        f"{BIỂU_TƯỢNG['dong_ho']} Thời hạn: <code>{ngay} ngày</code>\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Lượt sử dụng: <code>{so_lan_su_dung_toi_da}</code>"
+    code_name = parts[1].upper()
+    days = int(parts[2])
+    max_uses = int(parts[3])
+    create_premium_code(code_name, days, max_uses)
+    response_text = (
+        f"╭─── {ICONS['admin']} <b>Tạo Mã VIP</b> ───╮\n"
+        f"│ {ICONS['success']} Tạo mã thành công!\n"
+        f"│ {ICONS['vip']} Mã: <code>{code_name}</code>\n"
+        f"│ {ICONS['clock']} Thời hạn: <code>{days} ngày</code>\n"
+        f"│ {ICONS['info']} Lượt dùng: <code>{max_uses}</code>\n"
+        f"╰────────────────────────────╯"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"tạo_mã:{ma_ten}")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"create_code:{code_name}")
 
-@bot.message_handler(commands=['danh_sach_ma'])
-def xu_ly_danh_sach_ma(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['listcode'])
+def handle_list_codes(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    if not ma_vip_db:
-        noi_dung = (
-            f"🌌 <b>Danh Sách Mã VIP</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Không có mã VIP nào!"
+    if not codes_db:
+        response_text = (
+            f"╭─── {ICONS['admin']} <b>Danh Sách Mã</b> ───╮\n"
+            f"│ {ICONS['info']} Chưa có mã nào!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    danh_sach = [f"🌌 <b>VIP Code List</b> 🌌\n═══ Danh Sách Mã VIP ═══"]
-    for ma, chi_tiet in ma_vip_db.items():
-        danh_sach.append(
-            f"{BIỂU_TƯỢNG['moi']} Mã: <code>{ma}</code>\n"
-            f"   {BIỂU_TƯỢNG['dong_ho']} Thời hạn: <code>{chi_tiet['days']} ngày</code>\n"
-            f"   {BIỂU_TƯỢNG['thong_tin']} Lượt dùng: <code>{chi_tiet['so_lan_su_dung']}/{chi_tiet['so_lan_su_dung_toi_da']}</code>\n"
-            f"   {BIỂU_TƯỢNG['thoi_gian']} Tạo: <code>{chi_tiet['ngay_tao']}</code>"
+    codes_list = [f"╭─── {ICONS['admin']} <b>Danh Sách Mã</b> ───╮"]
+    for code, details in codes_db.items():
+        codes_list.append(
+            f"""
+│ {ICONS['vip']} <b><code>{code}</code></b>\n
+│ {ICONS['clock']} {details['days']} ngày | {ICONS['info']} {details['used_count']}/{details['max_uses']}\n
+│ {ICONS['time']} Tạo: {details['created_at']}\n
+│ {ICONS['user']} {len(details['used_by'])} người dùng
+            """
         )
-    noi_dung = "\n\n".join(danh_sach)
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "danh_sach_ma")
+    codes_list.append(f"╰────────────────────────────╯")
+    response_text = "\n".join(codes_list)
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, "list_codes")
 
-@bot.message_handler(commands=['kich_hoat'])
-def xu_ly_kich_hoat(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['kichhoat'])
+def handle_kichhoat(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    phan = tin_nhan.text.split()
-    if len(phan) != 3:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /kich_hoat [id] [ngày]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+    parts = message.text.split()
+    if len(parts) != 3:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Cú pháp: /kichhoat [id] [ngày]\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    uid = phan[1]
+    uid = parts[1]
+    days = int(parts[2])
+    if days <= 0:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Số ngày phải lớn hơn 0!\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+        return
+    exp_date = activate_vip(uid, days)
     try:
-        ngay = int(phan[2])
-        ngay_het_han = kich_hoat_vip(uid, ngay, mo_rong=True)
-        try:
-            bot.send_message(
-                uid,
-                f"🌌 <b>VIP Kích Hoạt</b> 🌌\n═══ Thông Báo ═══\n"
-                f"{BIỂU_TƯỢNG['thanh_cong']} VIP đã được kích hoạt {ngay} ngày!\n"
-                f"{BIỂU_TƯỢNG['dong_ho']} Hết hạn: <code>{ngay_het_han}</code>",
-                parse_mode="HTML"
-            )
-        except:
-            pass
-        noi_dung = (
-            f"🌌 <b>Quản Lý VIP</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['thanh_cong']} Đã kích hoạt VIP cho ID <code>{uid}</code> {ngay} ngày!\n"
-            f"{BIỂU_TƯỢNG['dong_ho']} Hết hạn: <code>{ngay_het_han}</code>"
+        bot.send_message(
+            uid,
+            f"""
+{random.choice(RESPONSE_ICONS)} ╭─── {ICONS['vip']} <b>Kích Hoạt VIP</b> ───╮
+│ {ICONS['success']} VIP của bạn đã được kích hoạt!
+│ {ICONS['clock']} Thời hạn: <code>{days} ngày</code>
+│ {ICONS['time']} Hết hạn: <code>{exp_date}</code>
+╰────────────────────────────╯
+            """,
+            parse_mode="HTML"
         )
-    except ValueError:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Số ngày phải là số nguyên!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
-        )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"kich_hoat_vip:{uid}")
+    except:
+        pass
+    response_text = (
+        f"╭─── {ICONS['admin']} <b>Kích Hoạt VIP</b> ───╮\n"
+        f"│ {ICONS['success']} Kích hoạt VIP thành công!\n"
+        f"│ {ICONS['user']} ID: <code>{uid}</code>\n"
+        f"│ {ICONS['clock']} Thời hạn: <code>{days} ngày</code>\n"
+        f"│ {ICONS['time']} Hết hạn: <code>{exp_date}</code>\n"
+        f"╰────────────────────────────╯"
+    )
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"activate:{uid}")
 
-@bot.message_handler(commands=['huy_kich_hoat'])
-def xu_ly_huy_kich_hoat(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['huykichhoat'])
+def handle_huykichhoat(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    phan = tin_nhan.text.split()
-    if len(phan) != 2:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /huy_kich_hoat [id]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+    parts = message.text.split()
+    if len(parts) != 2:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Cú pháp: /huykichhoat [id]\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    uid = phan[1]
-    if uid in nguoi_dung:
-        nguoi_dung[uid]["vip_kich_hoat"] = False
-        nguoi_dung[uid]["vip_het_han"] = "N/A"
-        CoSoDuLieu.luu(nguoi_dung, 'nguoi_dung')
+    uid = parts[1]
+    if uid in users:
+        users[uid]["vip_active"] = False
+        users[uid].pop("vip_expire", None)
+        Database.save(users, 'users')
         try:
             bot.send_message(
                 uid,
-                f"🌌 <b>VIP Đã Hủy</b> 🌌\n═══ Thông Báo ═══\n"
-                f"{BIỂU_TƯỢNG['loi']} Tài khoản VIP của bạn đã bị hủy!",
+                f"""
+{random.choice(RESPONSE_ICONS)} ╭─── {ICONS['vip']} <b>Hủy VIP</b> ───╮
+│ {ICONS['error']} VIP của bạn đã bị hủy!
+╰────────────────────────────╯
+                """,
                 parse_mode="HTML"
             )
         except:
             pass
-        noi_dung = (
-            f"🌌 <b>Quản Lý VIP</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['thanh_cong']} Đã hủy VIP của ID <code>{uid}</code>"
+        response_text = (
+            f"╭─── {ICONS['admin']} <b>Hủy VIP</b> ───╮\n"
+            f"│ {ICONS['success']} Đã hủy VIP cho ID <code>{uid}</code>\n"
+            f"╰────────────────────────────╯"
         )
     else:
-        noi_dung = (
-            f"🌌 <b>Quản Lý VIP</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} ID <code>{uid}</code> không tồn tại!"
+        response_text = (
+            f"╭─── {ICONS['admin']} <b>Hủy VIP</b> ───╮\n"
+            f"│ {ICONS['error']} Không tìm thấy ID <code>{uid}</code>\n"
+            f"╰────────────────────────────╯"
         )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"huy_vip:{uid}")
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, f"deactivate:{uid}")
 
-@bot.message_handler(commands=['gui'])
-def xu_ly_gui(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['send'])
+def handle_send(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    thong_diep = " ".join(tin_nhan.text.split()[1:])
-    if not thong_diep:
-        noi_dung = (
-            f"🌌 <b>Lỗi Cú Pháp</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Nhập: /gui [thông_điệp]\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+    content = message.text[6:].strip()
+    if not content:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Vui lòng nhập nội dung thông báo!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    so_luong_gui = 0
-    for uid in nguoi_dung:
+    total = len(users)
+    success = 0
+    failed = 0
+    reaction_emoji = random.choice(REACTION_EMOJIS)
+    bot.send_message(message.chat.id, reaction_emoji, reply_to_message_id=message.message_id)
+    bot.send_chat_action(message.chat.id, 'typing')
+    time.sleep(random.uniform(0.5, 1.5))
+    processing_msg = bot.send_message(
+        message.chat.id,
+        f"""
+{random.choice(RESPONSE_ICONS)} ╭─── {ICONS['broadcast']} <b>Thông Báo</b> ───╮
+│ {ICONS['info']} Đang gửi đến <code>{total}</code> người dùng...
+╰────────────────────────────╯
+        """,
+        parse_mode="HTML"
+    )
+    for uid in users:
         try:
             bot.send_message(
                 uid,
-                f"🌌 <b>Thông Báo Hệ Thống</b> 🌌\n═══ Nội Dung ═══\n"
-                f"{BIỂU_TƯỢNG['phat_tin']} {thong_diep}\n"
-                f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}",
+                f"""
+{random.choice(RESPONSE_ICONS)} ╭─── {ICONS['broadcast']} <b>Thông Báo Hệ Thống</b> ───╮
+│ {content}
+╰────────────────────────────╯
+                """,
                 parse_mode="HTML"
             )
-            so_luong_gui += 1
-            time.sleep(0.05)  # Tránh rate limit
+            success += 1
         except:
-            continue
-    noi_dung = (
-        f"🌌 <b>Broadcast Message</b> 🌌\n"
-        f"═══ Kết Quả ═══\n"
-        f"{BIỂU_TƯỢNG['thanh_cong']} Đã gửi đến <code>{so_luong_gui}</code> người dùng!"
+            failed += 1
+        time.sleep(0.1)
+    bot.edit_message_text(
+        f"""
+{random.choice(RESPONSE_ICONS)} ╭─── {ICONS['broadcast']} <b>Thông Báo</b> ───╮
+│ {ICONS['success']} Gửi thành công: <code>{success}</code>
+│ {ICONS['error']} Gửi thất bại: <code>{failed}</code>
+│ {ICONS['info']} Tổng người dùng: <code>{total}</code>
+╰────────────────────────────╯
+        """,
+        message.chat.id,
+        processing_msg.message_id,
+        parse_mode="HTML"
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-    theo_doi_hoat_dong(tin_nhan.from_user.id, f"phát_tin:{so_luong_gui}")
+    track_activity(message.from_user.id, f"broadcast:{success}/{failed}")
 
-@bot.message_handler(commands=['phan_tich'])
-def xu_ly_phan_tich(tin_nhan):
-    if not SERVER_TRANG_THAI and tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Bot Offline</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bot hiện đang tắt!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(commands=['thongke'])
+def handle_thongke(message):
+    if message.from_user.id != ADMIN_ID:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Bạn không có quyền!\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
         return
-    noi_dung = (
-        f"🌌 <b>Phân Tích MD5</b> 🌌\n"
-        f"═══ Hướng Dẫn ═══\n"
-        f"{BIỂU_TƯỢNG['phan_tich']} Gửi mã MD5 (32 ký tự) để phân tích!\n"
-        f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
+    total_users = len(users)
+    vip_users = sum(1 for uid in users if users[uid].get("vip_active", False))
+    active_users = sum(1 for uid in activity if 
+                       (datetime.now() - datetime.strptime(activity[uid]["last_seen"], "%Y-%m-%d %H:%M:%S")).days < 7)
+    total_requests = sum(int(act.get("request_count", 0)) for act in activity.values())
+    total_predictions = sum(len(h) for h in history.values())
+    correct_predictions = sum(
+        sum(1 for entry in history[uid] if entry.get("is_correct") is True)
+        for uid in history
     )
-    gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-    theo_doi_hoat_dong(tin_nhan.from_user.id, "phan_tich")
+    accuracy = correct_predictions / total_predictions * 100 if total_predictions > 0 else 0
+    total_ref = sum(len(refs) for refs in referral_db.values())
+    response_text = (
+        f"╭─── {ICONS['stats']} <b>Thống Kê Hệ Thống</b> ───╮\n"
+        f"│ {ICONS['user']} Người dùng:\n"
+        f"│ ├ Tổng: <code>{total_users}</code>\n"
+        f"│ ├ VIP: <code>{vip_users}</code>\n"
+        f"│ └ Active (7 ngày): <code>{active_users}</code>\n"
+        f"│ {ICONS['info']} Hoạt động:\n"
+        f"│ ├ Tổng yêu cầu: <code>{total_requests}</code>\n"
+        f"│ └ Trung bình: <code>{total_requests/max(1, len(activity)):.1f}</code>\n"
+        f"│ {ICONS['stats']} Dự đoán:\n"
+        f"│ ├ Tổng: <code>{total_predictions}</code>\n"
+        f"│ ├ Đúng: <code>{correct_predictions}</code>\n"
+        f"│ └ Chính xác: <code>{accuracy:.2f}%</code>\n"
+        f"│ {ICONS['invite']} Lượt mời:\n"
+        f"│ └ Tổng: <code>{total_ref}</code>\n"
+        f"│ {ICONS['time']} Cập nhật: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"╰────────────────────────────╯"
+    )
+    send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+    track_activity(message.from_user.id, "stats_system")
 
-@bot.callback_query_handler(func=lambda call: True)
-async def xu_ly_callback(call):
-    if call.data == "xác_minh_nhóm":
-        nhom_thieu = await kiem_tra_tham_gia_nhom(call.from_user.id)
-        if nhom_thieu:
-            noi_dung = (
-                f"🌌 <b>Xác Minh Nhóm</b> 🌌\n"
-                f"═══ Kết Quả ═══\n"
-                f"{BIỂU_TƯỢNG['loi']} Bạn chưa tham gia đủ nhóm:\n"
-                f"{''.join(f'{BIỂU_TƯỢNG['nhom']} {nhom}\n' for nhom in nhom_thieu)}"
-                f"{BIỂU_TƯỢNG['thong_tin']} Tham gia rồi nhấn lại nút!"
+@bot.message_handler(func=lambda m: re.match(r'^[a-f0-9]{32}$', m.text.strip().lower()))
+def handle_md5(message):
+    user_id = str(message.from_user.id)
+    
+    if users.get(user_id, {}).get("banned", False):
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Tài khoản của bạn đã bị cấm!\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text)
+        return
+    
+    if not is_vip_active(message.from_user.id):
+        response_text = (
+            f"╭─── {ICONS['lock']} <b>Yêu Cầu VIP</b> ───╮\n"
+            f"│ {ICONS['info']} Chức năng này chỉ dành cho VIP!\n"
+            f"│ {ICONS['vip']} Nhận VIP miễn phí:\n"
+            f"│ ├ 1. Dùng /start\n"
+            f"│ ├ 2. Tham gia nhóm\n"
+            f"│ └ 3. Nhận mã VIP 7 ngày\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+        return
+    
+    needs_feedback, pending_md5 = check_feedback_status(user_id)
+    if needs_feedback:
+        response_text = (
+            f"╭─── {ICONS['warning']} <b>Phản Hồi</b> ───╮\n"
+            f"│ {ICONS['warning']} Vui lòng phản hồi dự đoán trước đó!\n"
+            f"│ {ICONS['lock']} MD5: <code>{pending_md5[:8]}...{pending_md5[-8:]}</code>\n"
+            f"│ {ICONS['info']} Nhấn nút để đánh giá:\n"
+            f"╰────────────────────────────╯"
+        )
+        markup = types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton(f"{ICONS['correct']} Đúng", callback_data=f"correct_{pending_md5}"),
+            types.InlineKeyboardButton(f"{ICONS['wrong']} Sai", callback_data=f"wrong_{pending_md5}")
+        )
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, markup)
+        return
+    
+    try:
+        md5_hash = message.text.strip().lower()
+        analysis = MD5Analyzer.hyper_ai_engine(md5_hash)
+        result_msg = UserInterface.create_result_message(md5_hash, analysis)
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton(f"{ICONS['correct']} Đúng", callback_data=f"correct_{md5_hash}"),
+            types.InlineKeyboardButton(f"{ICONS['wrong']} Sai", callback_data=f"wrong_{md5_hash}")
+        )
+        reaction_emoji = random.choice(REACTION_EMOJIS)
+        bot.send_message(message.chat.id, reaction_emoji, reply_to_message_id=message.message_id)
+        bot.send_chat_action(message.chat.id, 'typing')
+        time.sleep(random.uniform(0.5, 1.5))
+        random_icon = random.choice(RESPONSE_ICONS)
+        bot.send_message(
+            message.chat.id,
+            f"{random_icon} {result_msg}",
+            parse_mode="HTML",
+            reply_markup=markup,
+            reply_to_message_id=message.message_id
+        )
+        save_prediction(message.from_user.id, md5_hash, analysis)
+        track_activity(message.from_user.id, "analyze_md5")
+    except Exception as e:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi Phân Tích</b> ───╮\n"
+            f"│ {ICONS['error']} Mã MD5 không hợp lệ (yêu cầu 32 ký tự hex)!\n"
+            f"│ {ICONS['info']} Ví dụ: <code>5d41402abc4b2a76b9719d911017c592</code>\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith(('correct_', 'wrong_')))
+def handle_feedback(call):
+    reaction_emoji = random.choice(REACTION_EMOJIS)
+    bot.send_message(call.message.chat.id, reaction_emoji, reply_to_message_id=call.message.message_id)
+    bot.send_chat_action(call.message.chat.id, 'typing')
+    time.sleep(random.uniform(0.5, 1.5))
+    
+    action, md5_hash = call.data.split('_', 1)
+    is_correct = action == "correct"
+    user_id = str(call.from_user.id)
+    for entry in history.get(user_id, []):
+        if entry["md5"] == md5_hash and entry.get("awaiting_feedback"):
+            entry["is_correct"] = is_correct
+            entry["awaiting_feedback"] = False
+            Database.save(history, 'history')
+            break
+    bot.answer_callback_query(call.id, "Phản hồi đã được ghi nhận!")
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    random_icon = random.choice(RESPONSE_ICONS)
+    response_text = (
+        f"╭─── {ICONS['success']} <b>Phản Hồi</b> ───╮\n"
+        f"│ {ICONS['success']} Phản hồi đã được ghi nhận!\n"
+        f"│ {ICONS['lock']} MD5: <code>{md5_hash[:8]}...{md5_hash[-8:]}</code>\n"
+        f"│ {ICONS['info']} Đánh giá: <b>{'Đúng' if is_correct else 'Sai'}</b>\n"
+        f"╰────────────────────────────╯"
+    )
+    bot.send_message(
+        call.message.chat.id,
+        f"{random_icon} {response_text}",
+        parse_mode="HTML",
+        reply_markup=UserInterface.create_inline_menu()
+    )
+    track_activity(call.from_user.id, f"feedback:{'correct' if is_correct else 'wrong'}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('menu_'))
+def handle_menu_callback(call):
+    reaction_emoji = random.choice(REACTION_EMOJIS)
+    bot.send_message(call.message.chat.id, reaction_emoji, reply_to_message_id=call.message.message_id)
+    bot.send_chat_action(call.message.chat.id, 'typing')
+    time.sleep(random.uniform(0.5, 1.5))
+    
+    action = call.data.split('_')[1]
+    if action == "analyze":
+        response_text = (
+            f"╭─── {ICONS['analyze']} <b>Phân Tích MD5</b> ───╮\n"
+            f"│ {ICONS['info']} Gửi mã MD5 32 ký tự để phân tích\n"
+            f"│ {ICONS['info']} Ví dụ: <code>5d41402abc4b2a76b9719d911017c592</code>\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
+    elif action == "vip":
+        uid = str(call.from_user.id)
+        status = "❌ Chưa kích hoạt"
+        status_icon = ICONS["lock"]
+        expire_str = "N/A"
+        if uid in users and users[uid].get("vip_active", False):
+            expire_str = users[uid].get("vip_expire", "N/A")
+            if datetime.now() <= datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S"):
+                status = "✅ Đã kích hoạt"
+                status_icon = ICONS["vip"]
+            else:
+                status = "❌ Hết hạn"
+                status_icon = ICONS["clock"]
+        response_text = (
+            f"╭─── {ICONS['vip']} <b>Thông Tin VIP</b> ───╮\n"
+            f"│ {ICONS['user']} ID: <code>{uid}</code>\n"
+            f"│ {status_icon} Trạng thái: <code>{status}</code>\n"
+            f"│ {ICONS['clock']} Hết hạn: <code>{expire_str}</code>\n"
+            f"│ {ICONS['invite']} Lượt mời: <code>{len(referral_db.get(uid, []))}</code>\n"
+            f"│ {ICONS['info']} Kích hoạt VIP: /code [mã]\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
+    elif action == "stats":
+        stats = get_user_stats(call.from_user.id)
+        if not stats:
+            response_text = (
+                f"╭─── {ICONS['stats']} <b>Thống Kê Cá Nhân</b> ───╮\n"
+                f"│ {ICONS['info']} Bạn chưa có thống kê!\n"
+                f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+                f"╰────────────────────────────╯"
             )
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['nhom']} Xác Minh Lại", callback_data="xác_minh_nhóm"))
+            send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
         else:
-            thanh_cong, thong_bao = su_dung_ma_vip(MA_VIP, call.from_user.id)
-            noi_dung = (
-                f"🌌 <b>Xác Minh Thành Công</b> 🌌\n"
-                f"═══ Kết Quả ═══\n"
-                f"{thong_bao}\n"
-                f"{BIỂU_TƯỢNG['thong_tin']} Dùng menu để khám phá!"
+            response_text = (
+                f"╭─── {ICONS['stats']} <b>Thống Kê Cá Nhân</b> ───╮\n"
+                f"│ {ICONS['correct']} Dự đoán đúng: <code>{stats['correct']}</code>\n"
+                f"│ {ICONS['wrong']} Dự đoán sai: <code>{stats['wrong']}</code>\n"
+                f"│ {ICONS['stats']} Tổng dự đoán: <code>{stats['total']}</code>\n"
+                f"│ {ICONS['stats']} Tỷ lệ chính xác: <code>{stats['accuracy']:.2f}%</code>\n"
+                f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+                f"╰────────────────────────────╯"
             )
-            markup = GiaoDienNguoiDung.tao_menu_tuong_tac()
-        await bot.edit_message_text(
-            noi_dung,
+            send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
+    elif action == "history":
+        uid = str(call.from_user.id)
+        if uid not in history or not history[uid]:
+            response_text = (
+                f"╭─── {ICONS['history']} <b>Lịch Sử Dự Đoán</b> ───╮\n"
+                f"│ {ICONS['info']} Bạn chưa có lịch sử dự đoán!\n"
+                f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+                f"╰────────────────────────────╯"
+            )
+            send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
+        else:
+            user_history = history[uid][-10:]
+            history_msg = [f"╭─── {ICONS['history']} <b>Lịch Sử Dự Đoán (Top 10)</b> ───╮"]
+            for idx, entry in enumerate(reversed(user_history), 1):
+                md5_short = f"{entry['md5'][:4]}...{entry['md5'][-4:]}"
+                result = entry.get('prediction', {}).get('final', {}).get('result', 'N/A')
+                time_str = datetime.strptime(entry['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
+                feedback = ICONS['correct'] if entry.get('is_correct') is True else ICONS['wrong'] if entry.get('is_correct') is False else ""
+                history_msg.append(f"│ {idx}. <code>{md5_short}</code> → <b>{result}</b> {feedback} | {time_str}")
+            history_msg.append(f"╰────────────────────────────╯")
+            response_text = "\n".join(history_msg)
+            send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
+    elif action == "invite":
+        user_id = call.from_user.id
+        invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+        response_text = (
+            f"╭─── {ICONS['invite']} <b>Mời Bạn Bè</b> ───╮\n"
+            f"│ {ICONS['invite']} Link mời: <code>{invite_link}</code>\n"
+            f"│ {ICONS['info']} Mời 1 người để nhận mã VIP 1 ngày!\n"
+            f"│ {ICONS['invite']} Tổng lượt mời: <code>{len(referral_db.get(str(user_id), []))}</code>\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
+    elif action == "help":
+        response_text = (
+            f"╭─── {ICONS['help']} <b>Hướng Dẫn Sử Dụng</b> ───╮\n"
+            f"│ {ICONS['analyze']} /start - Bắt đầu và nhận mã VIP\n"
+            f"│ {ICONS['vip']} /code [mã] - Kích hoạt VIP\n"
+            f"│ {ICONS['stats']} /stats - Xem thống kê cá nhân\n"
+            f"│ {ICONS['history']} /history - Xem lịch sử dự đoán\n"
+            f"│ {ICONS['invite']} /invite - Mời bạn bè\n"
+            f"│ {ICONS['help']} /help - Hiển thị hướng dẫn\n"
+            f"│ {ICONS['user']} /id - Xem thông tin tài khoản\n"
+            f"│ {ICONS['info']} Gửi mã MD5 32 ký tự để phân tích\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
+        )
+        send_response_with_reaction_and_typing(call.message.chat.id, call.message, response_text, UserInterface.create_inline_menu())
+    bot.answer_callback_query(call.id)
+    track_activity(call.from_user.id, f"menu:{action}")
+
+@bot.callback_query_handler(func=lambda call: call.data == "verify_groups")
+def handle_verify_groups(call):
+    reaction_emoji = random.choice(REACTION_EMOJIS)
+    bot.send_message(call.message.chat.id, reaction_emoji, reply_to_message_id=call.message.message_id)
+    bot.send_chat_action(call.message.chat.id, 'typing')
+    time.sleep(random.uniform(0.5, 1.5))
+    
+    missing_groups = check_group_membership(call.from_user.id)
+    if missing_groups:
+        bot.answer_callback_query(call.id, "Chưa tham gia đủ nhóm!")
+        response_text = (
+            f"╭─── {ICONS['warning']} <b>Xác Nhận Nhóm</b> ───╮\n"
+            f"│ {ICONS['warning']} Vui lòng tham gia các nhóm sau:\n"
+            f"│ {''.join(f"👥 {group}\n" for group in missing_groups)}"
+            f"╰────────────────────────────╯"
+        )
+        markup = types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton(f"{ICONS['success']} Thử Lại", callback_data="verify_groups")
+        )
+        random_icon = random.choice(RESPONSE_ICONS)
+        bot.send_message(
             call.message.chat.id,
-            call.message.message_id,
+            f"{random_icon} {response_text}",
             parse_mode="HTML",
             reply_markup=markup
         )
-        theo_doi_hoat_dong(call.from_user.id, "xác_minh_nhóm")
-    elif call.data == "menu_tro_giup":
-        noi_dung = (
-            f"🌌 <b>Hướng Dẫn Sử Dụng</b> 🌌\n"
-            f"═══ Lệnh Người Dùng ═══\n"
-            f"{BIỂU_TƯỢNG['phan_tich']} /start - Bắt đầu & nhận VIP\n"
-            f"{BIỂU_TƯỢNG['vip']} /ma [mã] - Kích hoạt VIP\n"
-            f"{BIỂU_TƯỢNG['thong_ke']} /thong_ke - Xem thống kê cá nhân\n"
-            f"{BIỂU_TƯỢNG['lich_su']} /lich_su - Xem lịch sử dự đoán\n"
-            f"{BIỂU_TƯỢNG['moi_ban']} /moi - Mời bạn bè\n"
-            f"{BIỂU_TƯỢNG['tro_giup']} /tro_giup - Hiển thị hướng dẫn\n"
-            f"{BIỂU_TƯỢNG['nguoi_dung']} /id - Xem thông tin tài khoản\n"
-            f"{BIỂU_TƯỢNG['phan_tich']} Gửi mã MD5 32 ký tự để phân tích\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
+    else:
+        bot.answer_callback_query(call.id, "Xác nhận thành công!")
+        response_text = (
+            f"╭─── {ICONS['success']} <b>Xác Nhận Thành Công</b> ───╮\n"
+            f"│ {ICONS['success']} Chúc mừng bạn đã nhận mã VIP!\n"
+            f"│ {ICONS['vip']} Mã: <code>{PREMIUM_CODE}</code>\n"
+            f"│ {ICONS['info']} Sử dụng: /code {PREMIUM_CODE}\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
         )
-        await bot.edit_message_text(
-            noi_dung,
+        random_icon = random.choice(RESPONSE_ICONS)
+        bot.send_message(
             call.message.chat.id,
-            call.message.message_id,
+            f"{random_icon} {response_text}",
             parse_mode="HTML",
-            reply_markup=GiaoDienNguoiDung.tao_menu_tuong_tac()
+            reply_markup=UserInterface.create_main_menu()
         )
-        theo_doi_hoat_dong(call.from_user.id, "menu_tro_giup")
-    elif call.data == "menu_phan_tich":
-        noi_dung = (
-            f"🌌 <b>Phân Tích MD5</b> 🌌\n"
-            f"═══ Hướng Dẫn ═══\n"
-            f"{BIỂU_TƯỢNG['phan_tich']} Gửi mã MD5 (32 ký tự) để phân tích!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
-        )
-        await bot.edit_message_text(
-            noi_dung,
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=GiaoDienNguoiDung.tao_menu_tuong_tac()
-        )
-        theo_doi_hoat_dong(call.from_user.id, "menu_phan_tich")
-    elif call.data in ["dung", "sai"]:
-        uid = str(call.from_user.id)
-        if uid in lich_su:
-            for muc in lich_su[uid]:
-                if muc.get("cho_phan_hoi", False):
-                    muc["la_dung"] = call.data == "dung"
-                    muc["cho_phan_hoi"] = False
-                    CoSoDuLieu.luu(lich_su, 'lich_su')
-                    break
-        noi_dung = (
-            f"🌌 <b>Phản Hồi</b> 🌌\n"
-            f"═══ Kết Quả ═══\n"
-            f"{BIỂU_TƯỢNG['thanh_cong']} Cảm ơn phản hồi của bạn!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Tiếp tục phân tích bằng cách gửi MD5!"
-        )
-        await bot.edit_message_text(
-            noi_dung,
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=GiaoDienNguoiDung.tao_menu_tuong_tac()
-        )
-        theo_doi_hoat_dong(call.from_user.id, f"phan_hoi:{call.data}")
+    track_activity(call.from_user.id, "verify_groups")
 
-@bot.message_handler(content_types=['text'])
-def xu_ly_danh_sach_ma(tin_nhan):
-    if tin_nhan.from_user.id != ADMIN_ID:
-        noi_dung = (
-            f"🌌 <b>Truy Cập Bị Từ Chối</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không có quyền admin!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+@bot.message_handler(func=lambda message: True)
+def handle_other_messages(message):
+    text = message.text.lower()
+    if text == f"{ICONS['analyze']} phân tích md5":
+        response_text = (
+            f"╭─── {ICONS['analyze']} <b>Phân Tích MD5</b> ───╮\n"
+            f"│ {ICONS['info']} Gửi mã MD5 32 ký tự để phân tích\n"
+            f"│ {ICONS['info']} Ví dụ: <code>5d41402abc4b2a76b9719d911017c592</code>\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    uid = str(tin_nhan.from_user.id)
-    if uid in nguoi_dung and nguoi_dung[uid].get("bi_cam", False):
-        noi_dung = (
-            f"🌌 <b>Tài Khoản Bị Cấm</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn không thể sử dụng bot!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Liên hệ {LIEN_HE_HO_TRO} để được hỗ trợ."
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+    elif text == f"{ICONS['vip']} thông tin vip":
+        uid = str(message.from_user.id)
+        status = "❌ Chưa kích hoạt"
+        status_icon = ICONS["lock"]
+        expire_str = "N/A"
+        if uid in users and users[uid].get("vip_active", False):
+            expire_str = users[uid].get("vip_expire", "N/A")
+            if datetime.now() <= datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S"):
+                status = "✅ Đã kích hoạt"
+                status_icon = ICONS["vip"]
+            else:
+                status = "❌ Hết hạn"
+                status_icon = ICONS["clock"]
+        response_text = (
+            f"╭─── {ICONS['vip']} <b>Thông Tin VIP</b> ───╮\n"
+            f"│ {ICONS['user']} ID: <code>{uid}</code>\n"
+            f"│ {status_icon} Trạng thái: <code>{status}</code>\n"
+            f"│ {ICONS['clock']} Hết hạn: <code>{expire_str}</code>\n"
+            f"│ {ICONS['invite']} Lượt mời: <code>{len(referral_db.get(uid, []))}</code>\n"
+            f"│ {ICONS['info']} Kích hoạt VIP: /code [mã]\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung)
-        return
-    if not kiem_tra_vip_kich_hoat(tin_nhan.from_user.id):
-        noi_dung = (
-            f"🌌 <b>Truy Cập Hạn Chế</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Bạn cần VIP để phân tích MD5!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Dùng /ma hoặc /start để kích hoạt VIP.\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_inline_menu())
+    elif text == f"{ICONS['stats']} thống kê":
+        handle_stats(message)
+    elif text == f"{ICONS['history']} lịch sử":
+        handle_history(message)
+    elif text == f"{ICONS['invite']} mời bạn":
+        handle_invite(message)
+    elif text == f"{ICONS['help']} hỗ trợ":
+        handle_help(message)
+    else:
+        response_text = (
+            f"╭─── {ICONS['error']} <b>Lỗi</b> ───╮\n"
+            f"│ {ICONS['error']} Lệnh không hợp lệ!\n"
+            f"│ {ICONS['info']} Gửi mã MD5 32 ký tự hoặc dùng /help\n"
+            f"│ {ICONS['help']} Liên hệ hỗ trợ: {SUPPORT_CONTACT}\n"
+            f"╰────────────────────────────╯"
         )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-        return
-    md5_input = tin_nhan.text.strip().lower()
-    if len(md5_input) != 32 or not re.match(r'^[a-f0-9]{32}$', md5_input):
-        noi_dung = (
-            f"🌌 <b>Lỗi Định Dạng</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} Mã MD5 phải là 32 ký tự hex!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Ví dụ: <code>098f6bcd4621d373cade4e832627b4f6</code>\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
-        return
-    cho_phan_hoi, md5_cho = kiem_tra_trang_thai_phan_hoi(tin_nhan.from_user.id)
-    if cho_phan_hoi and md5_cho != md5_input:
-        noi_dung = (
-            f"🌌 <b>Phản Hồi Đang Chờ</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['canh_bao']} Vui lòng phản hồi kết quả cho MD5 <code>{md5_cho[:8]}...{md5_cho[-8:]}</code>!\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Nhấn nút 'Đúng' hoặc 'Sai' trước khi phân tích tiếp."
-        )
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['dung']} Đúng", callback_data="dung"),
-            types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['sai']} Sai", callback_data="sai")
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, markup)
-        return
-    try:
-        phan_tich = PhanTichMD5.dong_co_sieu_tri_tue(md5_input)
-        bao_cao = GiaoDienNguoiDung.tao_bao_cao_phan_tich(md5_input, phan_tich)
-        luu_du_doan(tin_nhan.from_user.id, md5_input, phan_tich)
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['dung']} Đúng", callback_data="dung"),
-            types.InlineKeyboardButton(f"{BIỂU_TƯỢNG['sai']} Sai", callback_data="sai")
-        )
-        noi_dung = bao_cao + f"\n{BIỂU_TƯỢNG['thong_tin']} Phản hồi kết quả để cải thiện hệ thống!"
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, markup)
-        theo_doi_hoat_dong(tin_nhan.from_user.id, f"phan_tich_md5:{md5_input}")
-    except ValueError as e:
-        noi_dung = (
-            f"🌌 <b>Lỗi Phân Tích</b> 🌌\n"
-            f"═══ Thông Báo ═══\n"
-            f"{BIỂU_TƯỢNG['loi']} {str(e)}\n"
-            f"{BIỂU_TƯỢNG['thong_tin']} Hỗ trợ: {LIEN_HE_HO_TRO}"
-        )
-        gui_phan_hoi_dong_bo(tin_nhan.chat.id, tin_nhan, noi_dung, GiaoDienNguoiDung.tao_menu_tuong_tac())
+        send_response_with_reaction_and_typing(message.chat.id, message, response_text, UserInterface.create_main_menu())
+    track_activity(message.from_user.id, f"text:{message.text[:20]}")
 
 # ==============================================
-# KHỞI CHẠY BOT
+# KHỞI CHẠY HỆ THỐNG
 # ==============================================
 if __name__ == "__main__":
-    print(f"🌌 {TEN_BOT} đang khởi động...")
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=20)
-        except Exception as e:
-            print(f"Lỗi: {e}")
-            time.sleep(5)
+    if PREMIUM_CODE not in codes_db:
+        create_premium_code(PREMIUM_CODE, 7, 999999)
+    
+    print("🟢 Hệ thống đang khởi động...")
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        print(f"🔴 Lỗi hệ thống: {e}")
+    finally:
+        Database.save(users, 'users')
+        Database.save(history, 'history')
+        Database.save(activity, 'activity')
+        Database.save(codes_db, 'codes')
+        Database.save(referral_db, 'referral')
+        Database.save({'reverse_mode': reverse_mode}, 'config')
