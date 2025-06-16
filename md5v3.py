@@ -20,7 +20,7 @@ if not TOKEN:
     raise ValueError("❌ BOT_TOKEN chưa được thiết lập.")
 ADMIN_ID = 7780640154
 LIEN_HE_HO_TRO = "@huydev"
-NHOM_YEU_CAU = ["@techtitansteam", "@techtitansteamchat"]
+NHOM_YEU_CAU = ["@techtitansteam"]
 MA_VIP = "VIP7NGAYMIENPHI"
 TEN_BOT = "botmd5v2pro_bot"
 
@@ -73,23 +73,33 @@ che_do_dao = cau_hinh_db.get('che_do_dao', False)
 # ==============================================
 # TIỆN ÍCH HỆ THỐNG
 # ==============================================
-def kiem_tra_thanh_vien_nhom(user_id, nhom_username):
-    try:
-        # Kiểm tra xem bot có trong nhóm không
-        bot_info = bot.get_chat_member(nhom_username, bot.get_me().id)
-        if bot_info.status not in ['member', 'administrator', 'creator']:
-            print(f"Bot không có trong nhóm {nhom_username}")
-            return False
-        
-        # Kiểm tra trạng thái người dùng
-        thanh_vien = bot.get_chat_member(nhom_username, user_id)
-        return thanh_vien.status in ['member', 'administrator', 'creator']
-    except telebot.apihelper.ApiTelegramException as e:
-        print(f"Lỗi kiểm tra thành viên nhóm {nhom_username}: {e}")
-        return False
-    except Exception as e:
-        print(f"Lỗi không xác định khi kiểm tra nhóm {nhom_username}: {e}")
-        return False
+def kiem_tra_tham_gia_nhom(user_id):
+    nhom_thieu = []
+    # Cache tạm thời để giảm số lượng yêu cầu API (lưu trong bộ nhớ, hết hiệu lực sau 60 giây)
+    cache_key = f"nhom_{user_id}"
+    cache = CoSoDuLieu.tai('cache_nhom').get(cache_key, {})
+    thoi_gian_cache = cache.get('thoi_gian', 0)
+    
+    if time.time() - thoi_gian_cache < 60:
+        return cache.get('nhom_thieu', NHOM_YEU_CAU)
+    
+    for nhom in NHOM_YEU_CAU:
+        try:
+            thanh_vien = bot.get_chat_member(nhom, user_id)
+            if thanh_vien.status not in ['member', 'administrator', 'creator']:
+                nhom_thieu.append(nhom)
+        except telebot.apihelper.ApiTelegramException:
+            nhom_thieu.append(nhom)
+    
+    # Lưu cache
+    cache_nhom = CoSoDuLieu.tai('cache_nhom')
+    cache_nhom[cache_key] = {
+        'nhom_thieu': nhom_thieu,
+        'thoi_gian': time.time()
+    }
+    CoSoDuLieu.luu(cache_nhom, 'cache_nhom')
+    
+    return nhom_thieu
 
 def kich_hoat_vip(uid, days=7, mo_rong=False):
     uid = str(uid)
