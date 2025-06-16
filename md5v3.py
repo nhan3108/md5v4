@@ -75,23 +75,20 @@ che_do_dao = cau_hinh_db.get('che_do_dao', False)
 # ==============================================
 def kiem_tra_thanh_vien_nhom(user_id, nhom_username):
     try:
+        # Kiểm tra xem bot có trong nhóm không
+        bot_info = bot.get_chat_member(nhom_username, bot.get_me().id)
+        if bot_info.status not in ['member', 'administrator', 'creator']:
+            print(f"Bot không có trong nhóm {nhom_username}")
+            return False
+        
+        # Kiểm tra trạng thái người dùng
         thanh_vien = bot.get_chat_member(nhom_username, user_id)
         return thanh_vien.status in ['member', 'administrator', 'creator']
-    except:
+    except telebot.apihelper.ApiTelegramException as e:
+        print(f"Lỗi kiểm tra thành viên nhóm {nhom_username}: {e}")
         return False
-
-def kiem_tra_tham_gia_nhom(user_id):
-    return [nhom for nhom in NHOM_YEU_CAU if not kiem_tra_thanh_vien_nhom(user_id, nhom)]
-
-def kiem_tra_vip_kich_hoat(uid):
-    uid = str(uid)
-    nguoi = nguoi_dung.get(uid, {})
-    if not nguoi.get("vip_kich_hoat", False):
-        return False
-    het_han_str = nguoi.get("vip_het_han", "")
-    try:
-        return datetime.now() <= datetime.strptime(het_han_str, "%Y-%m-%d %H:%M:%S")
-    except:
+    except Exception as e:
+        print(f"Lỗi không xác định khi kiểm tra nhóm {nhom_username}: {e}")
         return False
 
 def kich_hoat_vip(uid, days=7, mo_rong=False):
