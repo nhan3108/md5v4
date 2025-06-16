@@ -278,9 +278,9 @@ class GiaoDienNguoiDung:
     def tao_thong_bao_ket_qua(md5_input, phan_tich):
         che_do = "ĐẢO" if phan_tich["da_dao"] else "BÌNH THƯỜNG"
         return (
-            f"🌌 <b>Phân Tích Tài Xỉu Md5</b> 🌌\n"
+            f"🌌 <b>Hyper-AI Galactic Analysis</b> 🌌\n"
             f"╭━━━━━━━━━━━━━━━━━━━━━━━╮\n"
-            f"│ 🪐 <b>Version:</b> Hyper-AI 7 Pro\n"
+            f"│ 🪐 <b>Phiên bản:</b> Siêu Trí Tuệ 7 Pro\n"
             f"│ 🔒 <b>MD5:</b> <code>{md5_input[:8]}...{md5_input[-8:]}</code>\n"
             f"│ 📊 <b>Tổng HEX:</b> <code>{phan_tich['tong']}</code>\n"
             f"│ ⚙️ <b>Chế độ:</b> <code>{che_do}</code>\n"
@@ -298,9 +298,9 @@ class GiaoDienNguoiDung:
             f"│ 📈 Xác suất: <code>{phan_tich['thuattoan3']['xac_suat']}</code>\n"
             f"├━━━━━━━━━━━━━━━━━━━━━━━┤\n"
             f"│ 📊 <b>Thống Kê Thuật Toán</b>\n"
-            f"│ 🌟 Hyper-AI: <code>{phan_tich['thuattoan1']['diem']:.2f}</code>\n"
-            f"│ 💎 Diamond AI: <code>{phan_tich['thuattoan2']['diem']:.2f}</code>\n"
-            f"│ 🛸 AI-Tech Titans: <code>{phan_tich['thuattoan3']['diem']:.2f}</code>\n"
+            f"│ 🌟 Hyper-AI Engine: <code>{phan_tich['thuattoan1']['diem']:.2f}</code>\n"
+            f"│ 💎 Diamond AI Engine: <code>{phan_tich['thuattoan2']['diem']:.2f}</code>\n"
+            f"│ 🛸 CAI-Tech Titans: <code>{phan_tich['thuattoan3']['diem']:.2f}</code>\n"
             f"├━━━━━━━━━━━━━━━━━━━━━━━┤\n"
             f"│ 🎯 <b>Dự Đoán Cuối Cùng</b>\n"
             f"│ {BIEU_TUONG['tai' if phan_tich['cuoi']['ket_qua'] == 'TÀI' else 'xiu']} Kết quả: <b>{phan_tich['cuoi']['ket_qua']}</b>\n"
@@ -390,7 +390,7 @@ def xu_ly_bat_dau(tin_nhan):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(f"🌌 Xác Minh Nhóm", callback_data="xác_minh_nhóm"))
     noi_dung_phan_hoi = (
-        f"🌌 <b>Chào mừng, {ten}, đến với Bot Tài Xỉu Md5</b> 🌌\n"
+        f"🌌 <b>Chào mừng, {ten}, đến với Bot Phân Tích Md5!</b> 🌌\n"
         f"╭━━━━━━━━━━━━━━━━━━━━━━━╮\n"
         f"│ 🚀 <b>Tham gia các nhóm vũ trụ để nhận VIP MIỄN PHÍ 7 ngày!</b>\n"
         f"│ 👥 @techtitansteam\n"
@@ -1422,7 +1422,7 @@ def xu_ly_tin_nhan_khac(tin_nhan):
         theo_doi_hoat_dong(user_id, "mời_bạn")
     elif van_ban == "🆘 trợ giúp":
         noi_dung_phan_hoi = (
-            f"🌌 <b>Hướng Dẫn Sử Dụng Bot</b> 🌌\n"
+            f"🌌 <b>Hướng Dẫn Lệnh Vũ Trụ</b> 🌌\n"
             f"╭━━━━━━━━━━━━━━━━━━━━━━━╮\n"
             f"│ 🌌 /start - Bắt đầu hành trình & nhận VIP\n"
             f"│ 💎 /ma [mã] - Kích hoạt VIP\n"
