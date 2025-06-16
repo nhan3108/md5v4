@@ -20,7 +20,7 @@ if not TOKEN:
     raise ValueError("❌ BOT_TOKEN chưa được thiết lập!")
 ADMIN_ID = 7780640154
 SUPPORT_CONTACT = "@huydev"
-REQUIRED_GROUPS = ["@techtitansteam", "@techtitansteamchat"]
+REQUIRED_GROUPS = ["@techtitansteam", "@techtitansteamchat", "@vanwnhatbox"]
 PREMIUM_CODE = "VIP7DAYFREE"
 BOT_USERNAME = "botmd5v2pro_bot"
 
@@ -400,6 +400,7 @@ def handle_start(message):
         f"│ {ICONS['info']} Tham gia các nhóm để nhận <b>VIP 7 ngày miễn phí</b>!\n"
         f"│ 👥 @techtitansteam\n"
         f"│ 👥 @techtitansteamchat\n"
+        f"│ 👥 @vanwnhatbox\n"
         f"│ {ICONS['help']} Nhấn nút để xác nhận và nhận mã!\n"
         f"╰────────────────────────────╯"
     )
